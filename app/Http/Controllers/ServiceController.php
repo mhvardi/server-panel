@@ -1654,12 +1654,18 @@ class ServiceController extends Controller
         ]);
     }
 
-    public function generateSsl(Service $service)
+    public function generateSsl(Request $request, Service $service)
     {
-        $targetDomains = array_unique(array_filter(array_merge(
-            $service->getClientDomains(),
-            [$service->domain]
-        )));
+        $selectedDomain = trim($request->input('target_domain', ''));
+
+        if (!empty($selectedDomain)) {
+            $targetDomains = [$selectedDomain];
+        } else {
+            $targetDomains = array_unique(array_filter(array_merge(
+                $service->getClientDomains(),
+                [$service->domain]
+            )));
+        }
 
         if (empty($targetDomains)) {
             return back()->withErrors(['error' => 'هیچ دامنه‌ای برای این سرویس یافت نشد.']);
@@ -1672,9 +1678,8 @@ class ServiceController extends Controller
 
             $webroot = rtrim($service->path, '/') . '/public';
             $domainFlags = implode(' ', array_map(fn($d) => "-d " . escapeshellarg($d), $targetDomains));
-            $primaryTarget = $targetDomains[0];
 
-            // 1. First try certbot with nginx plugin for all domains
+            // 1. First try certbot with nginx plugin for all target domains
             $cmd = "sudo certbot --nginx {$domainFlags} --non-interactive --agree-tos --register-unsafely-without-email --redirect";
             $result = $this->runSudoCommand($cmd);
 
@@ -1704,6 +1709,103 @@ class ServiceController extends Controller
         } catch (\Exception $e) {
             Log::error('Exception in generateSsl', ['service' => $service->id, 'error' => $e->getMessage()]);
             return back()->withErrors(['error' => 'استثنا در صدور SSL: ' . $e->getMessage()]);
+        }
+    }
+
+    public function revokeSsl(Request $request, Service $service)
+    {
+        $domain = trim($request->input('target_domain', ''));
+        if (empty($domain)) {
+            $domain = $service->getPrimaryDomain();
+        }
+
+        try {
+            if ($this->isWindows()) {
+                return back()->with('success', 'شبیه‌سازی: لغو گواهینامه SSL در ویندوز پشتیبانی نمی‌شود.');
+            }
+
+            // Delete certificate using certbot
+            $cmd = "sudo certbot delete --cert-name " . escapeshellarg($domain) . " --non-interactive";
+            $this->runSudoCommand($cmd);
+
+            // Re-apply nginx config
+            if ($service->type === 'subdomain') {
+                $this->createNginxConfigSubdomain($service->domain, $service->path);
+            }
+
+            $this->runSudoCommand("sudo systemctl reload nginx");
+
+            return back()->with('success', "گواهینامه SSL برای دامنه [{$domain}] با موفقیت لغو و حذف گردید.");
+        } catch (\Exception $e) {
+            Log::error('Exception in revokeSsl', ['domain' => $domain, 'error' => $e->getMessage()]);
+            return back()->withErrors(['error' => 'خطا در لغو گواهینامه SSL: ' . $e->getMessage()]);
+        }
+    }
+
+    public function triggerAutoRenew(Service $service)
+    {
+        try {
+            \Illuminate\Support\Facades\Artisan::call('ssl:auto-renew');
+            $output = \Illuminate\Support\Facades\Artisan::output();
+            return back()->with('success', "فرآیند تمدید خودکار گواهینامه‌ها اجرا شد.\n" . $output);
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => 'خطا در اجرای تمدید خودکار: ' . $e->getMessage()]);
+        }
+    }
+
+    public function storeCustomDomain(Request $request, Service $service)
+    {
+        $request->validate([
+            'custom_domain' => 'required|string|max:255',
+        ]);
+
+        $customDomain = strtolower(trim($request->input('custom_domain')));
+        $customDomain = preg_replace('#^https?://#', '', $customDomain);
+        $customDomain = trim(explode('/', $customDomain)[0]);
+
+        if (empty($customDomain) || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $customDomain)) {
+            return back()->withErrors(['error' => 'نام دامنه وارد شده معتبر نیست. لطفاً فرمت دامنه را بدون http/https وارد کنید (مثال: panel.shafa.doctor)']);
+        }
+
+        try {
+            $mapping = \App\Models\DomainMapping::updateOrCreate(
+                ['source_domain' => $customDomain],
+                [
+                    'service_id' => $service->id,
+                    'destination_domain' => $service->domain,
+                ]
+            );
+
+            // Recreate nginx config to handle new server_name if needed
+            if ($service->type === 'subdomain') {
+                $this->createNginxConfigSubdomain($service->domain, $service->path);
+            }
+
+            if ($request->has('issue_ssl')) {
+                // Automatically issue SSL for this new domain
+                return $this->generateSsl(new Request(['target_domain' => $customDomain]), $service);
+            }
+
+            return back()->with('success', "دامنه اختصاصی [{$customDomain}] با موفقیت برای این سرویس ثبت گردید.");
+        } catch (\Exception $e) {
+            Log::error('Error storing custom domain', ['error' => $e->getMessage()]);
+            return back()->withErrors(['error' => 'خطا در ثبت دامنه اختصاصی: ' . $e->getMessage()]);
+        }
+    }
+
+    public function destroyCustomDomain(Service $service, \App\Models\DomainMapping $domainMapping)
+    {
+        try {
+            $domain = $domainMapping->source_domain;
+            $domainMapping->delete();
+
+            if ($service->type === 'subdomain') {
+                $this->createNginxConfigSubdomain($service->domain, $service->path);
+            }
+
+            return back()->with('success', "دامنه اختصاصی [{$domain}] از این سرویس حذف شد.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => 'خطا در حذف دامنه اختصاصی: ' . $e->getMessage()]);
         }
     }
 

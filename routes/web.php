@@ -73,6 +73,10 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
     Route::resource('services', ServiceController::class);
     Route::get('/services/{service}/analyze', [ServiceController::class, 'analyze'])->name('services.analyze');
     Route::post('/services/{service}/ssl', [ServiceController::class, 'generateSsl'])->name('services.ssl');
+    Route::post('/services/{service}/ssl/revoke', [ServiceController::class, 'revokeSsl'])->name('services.ssl.revoke');
+    Route::post('/services/{service}/ssl/auto-renew', [ServiceController::class, 'triggerAutoRenew'])->name('services.ssl.auto-renew');
+    Route::post('/services/{service}/custom-domain', [ServiceController::class, 'storeCustomDomain'])->name('services.custom-domain.store');
+    Route::delete('/services/{service}/custom-domain/{domainMapping}', [ServiceController::class, 'destroyCustomDomain'])->name('services.custom-domain.destroy');
     Route::get('/services/{service}/logs', [ServiceController::class, 'getLogs'])->name('services.logs');
 
     // Service Extra Actions

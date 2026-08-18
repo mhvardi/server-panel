@@ -108,26 +108,63 @@
                         <div class="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
                             <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">جزئیات سرویس</h3>
                         </div>
-                        <div class="p-4 sm:p-6 text-sm text-gray-700 dark:text-gray-300 space-y-3">
+                        <div class="p-4 sm:p-6 text-sm text-gray-700 dark:text-gray-300 space-y-4">
                             @php
                                 $clientDomains = $service->domainMappings ?? collect();
                             @endphp
 
-                            @if($clientDomains->isNotEmpty())
-                                <div class="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                                    <div class="flex items-center justify-between mb-1">
-                                        <span class="text-xs font-bold text-emerald-800 dark:text-emerald-300">دامنه اختصاصی مشتری (مبدا):</span>
-                                        <a href="{{ route('domain-mappings.index') }}" class="text-[10px] text-emerald-600 hover:underline">مدیریت</a>
-                                    </div>
-                                    @foreach($clientDomains as $mapping)
-                                        <a href="https://{{ $mapping->source_domain }}"
-                                           target="_blank" class="text-sm font-bold text-emerald-600 hover:underline dark:text-emerald-400 break-all inline-flex items-center gap-1" dir="ltr">
-                                            https://{{ $mapping->source_domain }}
-                                            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                                        </a>
-                                    @endforeach
+                            <!-- Custom Client Domain Section -->
+                            <div class="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800" x-data="{ showAddDomain: false }">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                                        دامنه اختصاصی مشتری (مبدا):
+                                    </span>
+                                    <button type="button" @click="showAddDomain = !showAddDomain" class="text-xs font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
+                                        <span x-text="showAddDomain ? 'بستن' : '+ افزودن / تغییر دامنه'"></span>
+                                    </button>
                                 </div>
-                            @endif
+
+                                @if($clientDomains->isNotEmpty())
+                                    <div class="space-y-1.5 mb-2">
+                                        @foreach($clientDomains as $mapping)
+                                            <div class="flex items-center justify-between bg-white dark:bg-gray-800 px-2.5 py-1.5 rounded-lg border border-emerald-100 dark:border-emerald-900/60">
+                                                <a href="https://{{ $mapping->source_domain }}" target="_blank" class="text-xs font-bold text-emerald-600 hover:underline dark:text-emerald-400 break-all inline-flex items-center gap-1" dir="ltr">
+                                                    https://{{ $mapping->source_domain }}
+                                                    <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                                </a>
+                                                <form action="{{ route('services.custom-domain.destroy', [$service->id, $mapping->id]) }}" method="POST" onsubmit="return confirm('آیا از حذف این دامنه اختصاصی مطمئن هستید؟')">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button type="submit" class="text-red-500 hover:text-red-700 text-xs p-1" title="حذف دامنه اختصاصی">
+                                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                @else
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">هنوز دامنه اختصاصی برای این سرویس ثبت نشده است.</p>
+                                @endif
+
+                                <!-- Add/Edit Domain Form -->
+                                <div x-show="showAddDomain" x-cloak class="mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800">
+                                    <form action="{{ route('services.custom-domain.store', $service->id) }}" method="POST">
+                                        @csrf
+                                        <div class="mb-2">
+                                            <label class="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">نام دامنه مشتری (بدون http/https):</label>
+                                            <input type="text" name="custom_domain" placeholder="مثال: panel.shafa.doctor" required dir="ltr" class="w-full text-xs rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 text-left">
+                                        </div>
+                                        <div class="flex items-center mb-2">
+                                            <input type="checkbox" name="issue_ssl" id="issue_ssl_domain" value="1" checked class="h-3.5 w-3.5 text-emerald-600 rounded">
+                                            <label for="issue_ssl_domain" class="mr-1.5 text-[11px] text-gray-700 dark:text-gray-300">صدور خودکار گواهینامه SSL برای این دامنه</label>
+                                        </div>
+                                        <button type="submit" class="w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm">
+                                            ذخیره و ثبت دامنه
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
 
                             <p><strong>{{ $clientDomains->isNotEmpty() ? 'دامنه پایه (مقصد):' : 'دامنه سرویس:' }}</strong>
                                 <a href="http://{{ $service->type == 'subfolder' ? env('APP_MAIN_DOMAIN', request()->getHost()) . '/' . $service->domain : $service->domain }}"
@@ -162,21 +199,25 @@
                     
                     @if($service->type === 'subdomain')
                         <!-- SSL Status Widget -->
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md">
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md" x-data="{ selectedTargetDomain: '{{ $sslStatus['checked_domain'] ?? $service->getPrimaryDomain() }}' }">
                             <div class="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
                                 <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">وضعیت SSL (گواهینامه)</h3>
                             </div>
-                            <div class="p-4 sm:p-6">
-                                <div class="mb-3 pb-2 border-b border-gray-100 dark:border-gray-700">
-                                    <span class="text-xs text-gray-500 dark:text-gray-400 block">دامنه مورد سنجش SSL:</span>
-                                    <span class="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 break-all" dir="ltr">{{ $sslStatus['checked_domain'] ?? $service->domain }}</span>
-                                    @if(!empty($sslStatus['checked_domain']) && $sslStatus['checked_domain'] !== $service->domain)
-                                        <span class="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-0.5">(دامنه اختصاصی مشتری)</span>
-                                    @endif
+                            <div class="p-4 sm:p-6 space-y-4">
+                                <div class="pb-3 border-b border-gray-100 dark:border-gray-700">
+                                    <span class="text-xs text-gray-500 dark:text-gray-400 block mb-1">دامنه مورد سنجش SSL:</span>
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 break-all" dir="ltr">{{ $sslStatus['checked_domain'] ?? $service->domain }}</span>
+                                        @if(!empty($sslStatus['checked_domain']) && $sslStatus['checked_domain'] !== $service->domain)
+                                            <span class="text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-1.5 py-0.5 rounded font-semibold">دامنه مشتری</span>
+                                        @else
+                                            <span class="text-[10px] bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 px-1.5 py-0.5 rounded">دامنه سرویس</span>
+                                        @endif
+                                    </div>
                                 </div>
 
                                 @if($sslStatus['status'] === 'valid')
-                                    <div class="flex items-center mb-4">
+                                    <div class="flex items-center">
                                         <div class="flex-shrink-0">
                                             <svg class="h-8 w-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -190,12 +231,26 @@
                                             @endif
                                         </div>
                                     </div>
-                                    <form action="{{ route('services.ssl', $service->id) }}" method="POST">
-                                        @csrf
-                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">تمدید / بازصدور مجدد SSL</button>
-                                    </form>
+                                    
+                                    <div class="pt-2 flex flex-col gap-2">
+                                        <form action="{{ route('services.ssl', $service->id) }}" method="POST">
+                                            @csrf
+                                            <input type="hidden" name="target_domain" :value="selectedTargetDomain">
+                                            <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-xs font-medium rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                                                تمدید / صدور مجدد SSL
+                                            </button>
+                                        </form>
+
+                                        <form action="{{ route('services.ssl.revoke', $service->id) }}" method="POST" onsubmit="return confirm('آیا مطمئن هستید که می‌خواهید گواهینامه SSL این دامنه را لغو و حذف کنید؟')">
+                                            @csrf
+                                            <input type="hidden" name="target_domain" :value="selectedTargetDomain">
+                                            <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-1.5 border border-red-200 dark:border-red-900/60 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40 transition">
+                                                لغو و حذف گواهینامه SSL
+                                            </button>
+                                        </form>
+                                    </div>
                                 @elseif($sslStatus['status'] === 'expired')
-                                    <div class="flex items-center mb-4">
+                                    <div class="flex items-center">
                                         <div class="flex-shrink-0">
                                             <svg class="h-8 w-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -208,10 +263,13 @@
                                     </div>
                                     <form action="{{ route('services.ssl', $service->id) }}" method="POST">
                                         @csrf
-                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">تمدید SSL با Certbot</button>
+                                        <input type="hidden" name="target_domain" :value="selectedTargetDomain">
+                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                                            تمدید فوری SSL با Certbot
+                                        </button>
                                     </form>
                                 @elseif($sslStatus['status'] === 'missing')
-                                    <div class="flex items-center mb-4">
+                                    <div class="flex items-center">
                                         <div class="flex-shrink-0">
                                             <svg class="h-8 w-8 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -224,9 +282,30 @@
                                     </div>
                                     <form action="{{ route('services.ssl', $service->id) }}" method="POST">
                                         @csrf
-                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">نصب SSL با Certbot</button>
+                                        <input type="hidden" name="target_domain" :value="selectedTargetDomain">
+                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                                            نصب SSL با Certbot
+                                        </button>
                                     </form>
                                 @endif
+
+                                <!-- Auto-renewal status card -->
+                                <div class="pt-3 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg">
+                                    <div class="flex items-center justify-between mb-1.5">
+                                        <span class="text-[11px] font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1">
+                                            <span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+                                            اتوماسیون تمدید خودکار:
+                                        </span>
+                                        <span class="text-[10px] text-green-600 dark:text-green-400 font-semibold">فعال (روزانه ساعت ۰۳:۳۰)</span>
+                                    </div>
+                                    <p class="text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed mb-2">گواهینامه‌های نزدیک به تاریخ انقضا (کمتر از ۳۰ روز) توسط کرون جاب پنل به طور خودکار تمدید می‌شوند.</p>
+                                    <form action="{{ route('services.ssl.auto-renew', $service->id) }}" method="POST">
+                                        @csrf
+                                        <button type="submit" class="w-full text-center text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline">
+                                            اجرای دستی بررسی و تمدید همه گواهینامه‌ها ↻
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
                         </div>
                     @endif
