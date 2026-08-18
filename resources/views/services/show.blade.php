@@ -109,9 +109,29 @@
                             <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">جزئیات سرویس</h3>
                         </div>
                         <div class="p-4 sm:p-6 text-sm text-gray-700 dark:text-gray-300 space-y-3">
-                            <p><strong>دامنه:</strong>
+                            @php
+                                $clientDomains = $service->domainMappings ?? collect();
+                            @endphp
+
+                            @if($clientDomains->isNotEmpty())
+                                <div class="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <span class="text-xs font-bold text-emerald-800 dark:text-emerald-300">دامنه اختصاصی مشتری (مبدا):</span>
+                                        <a href="{{ route('domain-mappings.index') }}" class="text-[10px] text-emerald-600 hover:underline">مدیریت</a>
+                                    </div>
+                                    @foreach($clientDomains as $mapping)
+                                        <a href="https://{{ $mapping->source_domain }}"
+                                           target="_blank" class="text-sm font-bold text-emerald-600 hover:underline dark:text-emerald-400 break-all inline-flex items-center gap-1" dir="ltr">
+                                            https://{{ $mapping->source_domain }}
+                                            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                        </a>
+                                    @endforeach
+                                </div>
+                            @endif
+
+                            <p><strong>{{ $clientDomains->isNotEmpty() ? 'دامنه پایه (مقصد):' : 'دامنه سرویس:' }}</strong>
                                 <a href="http://{{ $service->type == 'subfolder' ? env('APP_MAIN_DOMAIN', request()->getHost()) . '/' . $service->domain : $service->domain }}"
-                                   target="_blank" class="text-indigo-600 hover:underline dark:text-indigo-400 break-all">
+                                   target="_blank" class="text-indigo-600 hover:underline dark:text-indigo-400 break-all" dir="ltr">
                                     {{ $service->type == 'subfolder' ? env('APP_MAIN_DOMAIN', request()->getHost()) . '/' . $service->domain : $service->domain }}
                                 </a>
                             </p>
@@ -143,10 +163,18 @@
                     @if($service->type === 'subdomain')
                         <!-- SSL Status Widget -->
                         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md">
-                            <div class="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+                            <div class="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
                                 <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">وضعیت SSL (گواهینامه)</h3>
                             </div>
                             <div class="p-4 sm:p-6">
+                                <div class="mb-3 pb-2 border-b border-gray-100 dark:border-gray-700">
+                                    <span class="text-xs text-gray-500 dark:text-gray-400 block">دامنه مورد سنجش SSL:</span>
+                                    <span class="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 break-all" dir="ltr">{{ $sslStatus['checked_domain'] ?? $service->domain }}</span>
+                                    @if(!empty($sslStatus['checked_domain']) && $sslStatus['checked_domain'] !== $service->domain)
+                                        <span class="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-0.5">(دامنه اختصاصی مشتری)</span>
+                                    @endif
+                                </div>
+
                                 @if($sslStatus['status'] === 'valid')
                                     <div class="flex items-center mb-4">
                                         <div class="flex-shrink-0">
@@ -157,8 +185,15 @@
                                         <div class="ml-3 rtl:mr-3 rtl:ml-0">
                                             <p class="text-sm font-medium text-gray-900 dark:text-white">فعال و معتبر</p>
                                             <p class="text-xs text-gray-500 dark:text-gray-400">انقضا در {{ $sslStatus['days'] }} روز ({{ $sslStatus['expires_at'] }})</p>
+                                            @if(!empty($sslStatus['issuer']))
+                                                <p class="text-[11px] text-gray-400 mt-0.5">صادرکننده: {{ $sslStatus['issuer'] }}</p>
+                                            @endif
                                         </div>
                                     </div>
+                                    <form action="{{ route('services.ssl', $service->id) }}" method="POST">
+                                        @csrf
+                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">تمدید / بازصدور مجدد SSL</button>
+                                    </form>
                                 @elseif($sslStatus['status'] === 'expired')
                                     <div class="flex items-center mb-4">
                                         <div class="flex-shrink-0">
@@ -168,11 +203,12 @@
                                         </div>
                                         <div class="ml-3 rtl:mr-3 rtl:ml-0">
                                             <p class="text-sm font-medium text-red-600 dark:text-red-400">منقضی شده</p>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400">تاریخ انقضا: {{ $sslStatus['expires_at'] ?? 'گذشته' }}</p>
                                         </div>
                                     </div>
                                     <form action="{{ route('services.ssl', $service->id) }}" method="POST">
                                         @csrf
-                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">تمدید SSL</button>
+                                        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">تمدید SSL با Certbot</button>
                                     </form>
                                 @elseif($sslStatus['status'] === 'missing')
                                     <div class="flex items-center mb-4">
@@ -183,6 +219,7 @@
                                         </div>
                                         <div class="ml-3 rtl:mr-3 rtl:ml-0">
                                             <p class="text-sm font-medium text-yellow-700 dark:text-yellow-400">گواهینامه یافت نشد</p>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400">روی پورت 443 فعال نیست</p>
                                         </div>
                                     </div>
                                     <form action="{{ route('services.ssl', $service->id) }}" method="POST">

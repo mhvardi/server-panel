@@ -31,9 +31,9 @@ class CheckUptime extends Command
         foreach ($services as $service) {
             $domain = $service->type === 'subfolder' 
                 ? env('APP_MAIN_DOMAIN') . '/' . $service->domain 
-                : $service->domain;
+                : $service->getPrimaryDomain();
                 
-            $url = 'http://' . $domain;
+            $url = 'https://' . $domain;
             
             try {
                 $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url);

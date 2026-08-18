@@ -728,13 +728,16 @@ class ServiceController extends Controller
 
     public function index(Request $request)
     {
-        $query = Service::query();
+        $query = Service::with('domainMappings');
 
         if ($request->filled('search')) {
             $searchTerm = $request->search;
             $query->where(function($q) use ($searchTerm) {
                 $q->where('name', 'like', "%{$searchTerm}%")
-                  ->orWhere('domain', 'like', "%{$searchTerm}%");
+                  ->orWhere('domain', 'like', "%{$searchTerm}%")
+                  ->orWhereHas('domainMappings', function($subQ) use ($searchTerm) {
+                      $subQ->where('source_domain', 'like', "%{$searchTerm}%");
+                  });
             });
         }
 
@@ -842,6 +845,7 @@ class ServiceController extends Controller
 
     public function show(Service $service)
     {
+        $service->load('domainMappings');
         $hasGit = File::exists($service->path . '/.git');
         $structure = [];
         if (File::exists($service->path)) {
@@ -1652,9 +1656,13 @@ class ServiceController extends Controller
 
     public function generateSsl(Service $service)
     {
-        $domain = trim($service->domain);
-        if (empty($domain)) {
-            return back()->withErrors(['error' => 'دامنه یا ساب‌دامنه برای این سرویس نامعتبر است.']);
+        $targetDomains = array_unique(array_filter(array_merge(
+            $service->getClientDomains(),
+            [$service->domain]
+        )));
+
+        if (empty($targetDomains)) {
+            return back()->withErrors(['error' => 'هیچ دامنه‌ای برای این سرویس یافت نشد.']);
         }
 
         try {
@@ -1663,20 +1671,21 @@ class ServiceController extends Controller
             }
 
             $webroot = rtrim($service->path, '/') . '/public';
-            $safeDomain = $this->nginxSafeName($domain);
+            $domainFlags = implode(' ', array_map(fn($d) => "-d " . escapeshellarg($d), $targetDomains));
+            $primaryTarget = $targetDomains[0];
 
-            // 1. First try certbot with nginx plugin
-            $cmd = "sudo certbot --nginx -d " . escapeshellarg($domain) . " --non-interactive --agree-tos --register-unsafely-without-email --redirect";
+            // 1. First try certbot with nginx plugin for all domains
+            $cmd = "sudo certbot --nginx {$domainFlags} --non-interactive --agree-tos --register-unsafely-without-email --redirect";
             $result = $this->runSudoCommand($cmd);
 
             // 2. If --nginx plugin fails, fallback to webroot method
             if (!$result->successful() && File::exists($webroot)) {
-                $cmdWebroot = "sudo certbot certonly --webroot -w " . escapeshellarg($webroot) . " -d " . escapeshellarg($domain) . " --non-interactive --agree-tos --register-unsafely-without-email";
+                $cmdWebroot = "sudo certbot certonly --webroot -w " . escapeshellarg($webroot) . " {$domainFlags} --non-interactive --agree-tos --register-unsafely-without-email";
                 $resultWebroot = $this->runSudoCommand($cmdWebroot);
                 if ($resultWebroot->successful()) {
                     $result = $resultWebroot;
                     if ($service->type === 'subdomain') {
-                        $this->createNginxConfigSubdomain($domain, $service->path);
+                        $this->createNginxConfigSubdomain($service->domain, $service->path);
                     }
                 }
             }
@@ -1684,15 +1693,16 @@ class ServiceController extends Controller
             // 3. Reload Nginx to apply changes
             $this->runSudoCommand("sudo systemctl reload nginx");
 
+            $domainsListStr = implode(' ، ', $targetDomains);
             if ($result->successful()) {
-                return back()->with('success', "گواهینامه SSL برای دامنه {$domain} با موفقیت توسط Certbot صادر و فعال گردید.");
+                return back()->with('success', "گواهینامه SSL برای دامنه‌(های) [{$domainsListStr}] با موفقیت صادر و فعال گردید.");
             } else {
                 $errorMsg = $result->errorOutput() ?: $result->output();
-                Log::error('Certbot SSL issue failed', ['domain' => $domain, 'error' => $errorMsg]);
+                Log::error('Certbot SSL issue failed', ['domains' => $targetDomains, 'error' => $errorMsg]);
                 return back()->withErrors(['error' => 'خطا در صدور SSL: ' . $errorMsg]);
             }
         } catch (\Exception $e) {
-            Log::error('Exception in generateSsl', ['domain' => $domain, 'error' => $e->getMessage()]);
+            Log::error('Exception in generateSsl', ['service' => $service->id, 'error' => $e->getMessage()]);
             return back()->withErrors(['error' => 'استثنا در صدور SSL: ' . $e->getMessage()]);
         }
     }

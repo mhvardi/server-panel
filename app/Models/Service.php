@@ -98,18 +98,35 @@ class Service extends Model
         return $totalBytes;
     }
 
+    public function domainMappings()
+    {
+        return $this->hasMany(\App\Models\DomainMapping::class);
+    }
+
+    public function getClientDomains(): array
+    {
+        return $this->domainMappings()->pluck('source_domain')->filter()->values()->toArray();
+    }
+
+    public function getPrimaryDomain(): string
+    {
+        $clientDomain = $this->domainMappings()->latest()->value('source_domain');
+        return !empty($clientDomain) ? trim($clientDomain) : trim($this->domain);
+    }
+
     public function getSslStatus(): array
     {
         if ($this->type !== 'subdomain') {
             return ['status' => 'not_applicable'];
         }
 
-        $domain = trim($this->domain);
-        if (empty($domain)) {
-            return ['status' => 'missing'];
+        // The target domain to check is primarily the client's custom domain (if mapped), otherwise service domain
+        $targetDomain = $this->getPrimaryDomain();
+        if (empty($targetDomain)) {
+            return ['status' => 'missing', 'checked_domain' => $this->domain];
         }
 
-        // 1. Try checking live SSL certificate over network (works for any domain / reverse proxy / Let's Encrypt)
+        // 1. Try checking live SSL certificate over network (works for any client domain / reverse proxy / Cloudflare / Let's Encrypt)
         try {
             $context = stream_context_create([
                 'ssl' => [
@@ -120,10 +137,10 @@ class Service extends Model
             ]);
 
             $client = @stream_socket_client(
-                "ssl://{$domain}:443",
+                "ssl://{$targetDomain}:443",
                 $errno,
                 $errstr,
-                2.5,
+                3,
                 STREAM_CLIENT_CONNECT,
                 $context
             );
@@ -144,6 +161,7 @@ class Service extends Model
                             'days' => max(0, (int) $days),
                             'expires_at' => date('Y-m-d', $expiresAt),
                             'issuer' => $issuer,
+                            'checked_domain' => $targetDomain,
                         ];
                     }
                 }
@@ -152,32 +170,35 @@ class Service extends Model
             // Socket check failed, proceed to local certificate file check
         }
 
-        // 2. Check local Let's Encrypt certificate file paths
-        $safeDomain = preg_replace('/[^a-z0-9._-]+/', '-', strtolower($domain));
-        $possiblePaths = [
-            "/etc/letsencrypt/live/{$domain}/fullchain.pem",
-            "/etc/letsencrypt/live/{$safeDomain}/fullchain.pem",
-            "/etc/letsencrypt/live/{$domain}-0001/fullchain.pem",
-        ];
+        // 2. Check local Let's Encrypt certificate file paths for target domain and service domain
+        $domainsToCheck = array_unique(array_filter([$targetDomain, $this->domain]));
+        foreach ($domainsToCheck as $dom) {
+            $safeDomain = preg_replace('/[^a-z0-9._-]+/', '-', strtolower($dom));
+            $possiblePaths = [
+                "/etc/letsencrypt/live/{$dom}/fullchain.pem",
+                "/etc/letsencrypt/live/{$safeDomain}/fullchain.pem",
+                "/etc/letsencrypt/live/{$dom}-0001/fullchain.pem",
+            ];
 
-        foreach ($possiblePaths as $certPath) {
-            // Check with sudo openssl command to bypass www-data permission limitations on /etc/letsencrypt
-            $cmd = "sudo openssl x509 -enddate -noout -in " . escapeshellarg($certPath) . " 2>/dev/null";
-            $output = @exec($cmd);
+            foreach ($possiblePaths as $certPath) {
+                $cmd = "sudo openssl x509 -enddate -noout -in " . escapeshellarg($certPath) . " 2>/dev/null";
+                $output = @exec($cmd);
 
-            if ($output && preg_match('/notAfter=(.+)/', $output, $matches)) {
-                $date = strtotime($matches[1]);
-                $days = round(($date - time()) / 86400);
+                if ($output && preg_match('/notAfter=(.+)/', $output, $matches)) {
+                    $date = strtotime($matches[1]);
+                    $days = round(($date - time()) / 86400);
 
-                return [
-                    'status' => $days > 0 ? 'valid' : 'expired',
-                    'days' => max(0, (int) $days),
-                    'expires_at' => date('Y-m-d', $date),
-                    'issuer' => 'Let\'s Encrypt (Local)',
-                ];
+                    return [
+                        'status' => $days > 0 ? 'valid' : 'expired',
+                        'days' => max(0, (int) $days),
+                        'expires_at' => date('Y-m-d', $date),
+                        'issuer' => 'Let\'s Encrypt (Local)',
+                        'checked_domain' => $dom,
+                    ];
+                }
             }
         }
 
-        return ['status' => 'missing'];
+        return ['status' => 'missing', 'checked_domain' => $targetDomain];
     }
 }
