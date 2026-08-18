@@ -59,13 +59,24 @@ class ArvanCloudService
         // در API آروان، CNAME از کلید host و ANAME از کلید location استفاده می‌کند
         $valueKey = ($type === 'aname') ? 'location' : 'host';
 
-        // ۱. بررسی اینکه آیا این رکورد از قبل در آروان وجود دارد یا خیر
-        $existingId = $this->findDnsRecordId($domain, $recordName, $type);
+        // ۱. بررسی اینکه آیا این رکورد از قبل در آروان وجود دارد یا خیر (بدون حساسیت به نوع رکورد)
+        $existingRecord = $this->findAnyDnsRecord($domain, $recordName);
 
-        if ($existingId) {
-            Log::info("Record already exists. Skipping creation and returning existing ID.", ['domain' => $domain, 'name' => $recordName]);
-            // اگر وجود داشت، به جای ساخت مجدد و دریافت ارور داپلیکیت، شبیه‌سازی یک عملیات موفق را انجام می‌دهیم
-            return ['data' => ['id' => $existingId]];
+        if ($existingRecord) {
+            Log::info("Record already exists in ArvanCloud. Updating target...", ['domain' => $domain, 'name' => $recordName, 'id' => $existingRecord['id']]);
+            
+            // سعی در بروزرسانی رکورد موجود
+            $updateUrl = "{$this->baseUrl}/domains/{$domain}/dns-records/{$existingRecord['id']}";
+            $updateData = [
+                'type' => $existingRecord['type'],
+                'name' => $recordName,
+                'value' => [($existingRecord['type'] === 'aname' ? 'location' : 'host') => $target],
+                'cloud' => true,
+                'ttl' => 120,
+            ];
+            $updateRes = Http::withHeaders($this->getHeaders())->put($updateUrl, $updateData);
+            
+            return ['data' => ['id' => $existingRecord['id']]];
         }
 
         $data = [
@@ -76,28 +87,40 @@ class ArvanCloudService
             'ttl' => 120,
         ];
 
-        Log::info("Creating {$type} record.", ['domain' => $domain, 'data' => $data]);
-        return Http::withHeaders($this->getHeaders())->post($url, $data)->json();
+        Log::info("Creating {$type} record in ArvanCloud.", ['domain' => $domain, 'data' => $data]);
+        $response = Http::withHeaders($this->getHeaders())->post($url, $data);
+        $resJson = $response->json();
+
+        // اگر آروان خطای تکراری بودن داد، رکورد را مجدداً جستجو کرده و شناسه آن را بازمی‌گردانیم
+        if (!$response->successful() && isset($resJson['errors'])) {
+            $duplicateCheck = $this->findAnyDnsRecord($domain, $recordName);
+            if ($duplicateCheck) {
+                return ['data' => ['id' => $duplicateCheck['id']]];
+            }
+        }
+
+        return $resJson;
     }
 
-    public function findDnsRecordId($domain, $subdomain, $type = null)
+    public function findAnyDnsRecord($domain, $subdomain)
     {
         $url = "{$this->baseUrl}/domains/{$domain}/dns-records";
-        $response = Http::withHeaders($this->getHeaders())->get($url, ['search' => $subdomain]);
-
-        // اگر نوع رکورد از سمت کنترلر فرستاده نشده باشد، به‌صورت هوشمند تشخیص می‌دهد
-        if (is_null($type)) {
-            $type = ($subdomain === '@' || empty($subdomain)) ? 'aname' : 'cname';
-        }
+        $response = Http::withHeaders($this->getHeaders())->get($url, ['per_page' => 100]);
 
         if ($response->successful()) {
             foreach ($response->json('data', []) as $record) {
-                if ($record['name'] === $subdomain && $record['type'] === $type) {
-                    return $record['id'];
+                if (strtolower($record['name']) === strtolower($subdomain)) {
+                    return $record;
                 }
             }
         }
         return null;
+    }
+
+    public function findDnsRecordId($domain, $subdomain, $type = null)
+    {
+        $record = $this->findAnyDnsRecord($domain, $subdomain);
+        return $record['id'] ?? null;
     }
 
     public function deleteDnsRecord($domain, $recordId)

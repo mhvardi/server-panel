@@ -56,18 +56,20 @@ class DomainMappingController extends Controller
             return back()->with('error', 'Failed to create DNS record on Arvan Cloud. Response: ' . json_encode($response));
         }
 
-        // Save the mapping in our database
-        $mapping = DomainMapping::create([
-            'service_id' => $service->id,
-            'source_domain' => $sourceDomain,
-            'destination_domain' => $destinationDomain,
-        ]);
+        // Save the mapping in our database (or update if already mapped)
+        $mapping = DomainMapping::updateOrCreate(
+            ['source_domain' => $sourceDomain],
+            [
+                'service_id' => $service->id,
+                'destination_domain' => $destinationDomain,
+            ]
+        );
 
         // Dispatch configuration task for the service
         $this->dispatchConfigurationTask($mapping);
         $this->arvan->purgeCache($arvanDomain);
 
-        return redirect()->route('domain-mappings.index')->with('success', "رکورد CNAME ایجاد شد. یک وظیفه برای تنظیم سرویس به صف اضافه شد.");
+        return redirect()->route('domain-mappings.index')->with('success', "رکورد DNS متصل شد و سرویس برای دامنه {$sourceDomain} تنظیم گردید.");
     }
 
     public function reprovision(DomainMapping $domainMapping)
