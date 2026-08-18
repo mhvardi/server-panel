@@ -104,27 +104,80 @@ class Service extends Model
             return ['status' => 'not_applicable'];
         }
 
-        $domain = $this->domain;
-        $certPath = "/etc/letsencrypt/live/{$domain}/fullchain.pem";
-
-        if (!file_exists($certPath)) {
+        $domain = trim($this->domain);
+        if (empty($domain)) {
             return ['status' => 'missing'];
         }
 
-        $cmd = "openssl x509 -enddate -noout -in " . escapeshellarg($certPath) . " 2>/dev/null";
-        $output = exec($cmd);
+        // 1. Try checking live SSL certificate over network (works for any domain / reverse proxy / Let's Encrypt)
+        try {
+            $context = stream_context_create([
+                'ssl' => [
+                    'capture_peer_cert' => true,
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                ]
+            ]);
 
-        if ($output && preg_match('/notAfter=(.+)/', $output, $matches)) {
-            $date = strtotime($matches[1]);
-            $days = round(($date - time()) / 86400);
+            $client = @stream_socket_client(
+                "ssl://{$domain}:443",
+                $errno,
+                $errstr,
+                2.5,
+                STREAM_CLIENT_CONNECT,
+                $context
+            );
 
-            if ($days <= 0) {
-                return ['status' => 'expired', 'days' => 0];
+            if ($client) {
+                $params = stream_context_get_params($client);
+                fclose($client);
+
+                if (!empty($params['options']['ssl']['peer_certificate'])) {
+                    $cert = openssl_x509_parse($params['options']['ssl']['peer_certificate']);
+                    if (!empty($cert['validTo_time_t'])) {
+                        $expiresAt = $cert['validTo_time_t'];
+                        $days = round(($expiresAt - time()) / 86400);
+                        $issuer = $cert['issuer']['O'] ?? ($cert['issuer']['CN'] ?? 'Let\'s Encrypt');
+
+                        return [
+                            'status' => $days > 0 ? 'valid' : 'expired',
+                            'days' => max(0, (int) $days),
+                            'expires_at' => date('Y-m-d', $expiresAt),
+                            'issuer' => $issuer,
+                        ];
+                    }
+                }
             }
-            
-            return ['status' => 'valid', 'days' => $days, 'expires_at' => date('Y-m-d', $date)];
+        } catch (\Throwable $e) {
+            // Socket check failed, proceed to local certificate file check
         }
 
-        return ['status' => 'unknown'];
+        // 2. Check local Let's Encrypt certificate file paths
+        $safeDomain = preg_replace('/[^a-z0-9._-]+/', '-', strtolower($domain));
+        $possiblePaths = [
+            "/etc/letsencrypt/live/{$domain}/fullchain.pem",
+            "/etc/letsencrypt/live/{$safeDomain}/fullchain.pem",
+            "/etc/letsencrypt/live/{$domain}-0001/fullchain.pem",
+        ];
+
+        foreach ($possiblePaths as $certPath) {
+            // Check with sudo openssl command to bypass www-data permission limitations on /etc/letsencrypt
+            $cmd = "sudo openssl x509 -enddate -noout -in " . escapeshellarg($certPath) . " 2>/dev/null";
+            $output = @exec($cmd);
+
+            if ($output && preg_match('/notAfter=(.+)/', $output, $matches)) {
+                $date = strtotime($matches[1]);
+                $days = round(($date - time()) / 86400);
+
+                return [
+                    'status' => $days > 0 ? 'valid' : 'expired',
+                    'days' => max(0, (int) $days),
+                    'expires_at' => date('Y-m-d', $date),
+                    'issuer' => 'Let\'s Encrypt (Local)',
+                ];
+            }
+        }
+
+        return ['status' => 'missing'];
     }
 }

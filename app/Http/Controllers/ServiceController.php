@@ -1649,4 +1649,85 @@ class ServiceController extends Controller
             'dbName' => $service->getDatabaseName() ?? 'یافت نشد',
         ]);
     }
+
+    public function generateSsl(Service $service)
+    {
+        $domain = trim($service->domain);
+        if (empty($domain)) {
+            return back()->withErrors(['error' => 'دامنه یا ساب‌دامنه برای این سرویس نامعتبر است.']);
+        }
+
+        try {
+            if ($this->isWindows()) {
+                return back()->with('success', 'شبیه‌سازی: صدور گواهینامه SSL در ویندوز پشتیبانی نمی‌شود.');
+            }
+
+            $webroot = rtrim($service->path, '/') . '/public';
+            $safeDomain = $this->nginxSafeName($domain);
+
+            // 1. First try certbot with nginx plugin
+            $cmd = "sudo certbot --nginx -d " . escapeshellarg($domain) . " --non-interactive --agree-tos --register-unsafely-without-email --redirect";
+            $result = $this->runSudoCommand($cmd);
+
+            // 2. If --nginx plugin fails, fallback to webroot method
+            if (!$result->successful() && File::exists($webroot)) {
+                $cmdWebroot = "sudo certbot certonly --webroot -w " . escapeshellarg($webroot) . " -d " . escapeshellarg($domain) . " --non-interactive --agree-tos --register-unsafely-without-email";
+                $resultWebroot = $this->runSudoCommand($cmdWebroot);
+                if ($resultWebroot->successful()) {
+                    $result = $resultWebroot;
+                    if ($service->type === 'subdomain') {
+                        $this->createNginxConfigSubdomain($domain, $service->path);
+                    }
+                }
+            }
+
+            // 3. Reload Nginx to apply changes
+            $this->runSudoCommand("sudo systemctl reload nginx");
+
+            if ($result->successful()) {
+                return back()->with('success', "گواهینامه SSL برای دامنه {$domain} با موفقیت توسط Certbot صادر و فعال گردید.");
+            } else {
+                $errorMsg = $result->errorOutput() ?: $result->output();
+                Log::error('Certbot SSL issue failed', ['domain' => $domain, 'error' => $errorMsg]);
+                return back()->withErrors(['error' => 'خطا در صدور SSL: ' . $errorMsg]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Exception in generateSsl', ['domain' => $domain, 'error' => $e->getMessage()]);
+            return back()->withErrors(['error' => 'استثنا در صدور SSL: ' . $e->getMessage()]);
+        }
+    }
+
+    public function getLogs(Service $service)
+    {
+        $domain = $this->nginxSafeName($service->domain);
+
+        $paths = [
+            'access' => "/var/log/nginx/{$domain}-access.log",
+            'error' => "/var/log/nginx/{$domain}-error.log",
+            'ssl_access' => "/var/log/nginx/{$domain}-ssl-access.log",
+            'ssl_error' => "/var/log/nginx/{$domain}-ssl-error.log",
+        ];
+
+        $logs = [];
+
+        foreach ($paths as $key => $path) {
+            if (File::exists($path) && is_readable($path)) {
+                $cmd = "tail -n 100 " . escapeshellarg($path) . " 2>/dev/null";
+                $output = [];
+                exec($cmd, $output);
+                $logs[$key] = !empty($output) ? implode("\n", $output) : 'هیچ لاگی در این فایل ثبت نشده است.';
+            } else {
+                try {
+                    $res = $this->runSudoCommand("sudo tail -n 100 " . escapeshellarg($path));
+                    $logs[$key] = ($res->successful() && !empty(trim($res->output())))
+                        ? trim($res->output())
+                        : 'فایل لاگ یافت نشد یا هنوز لاگی برای این سرویس وجود ندارد.';
+                } catch (\Exception $e) {
+                    $logs[$key] = 'فایل لاگ ایجاد نشده یا خالی است.';
+                }
+            }
+        }
+
+        return response()->json($logs);
+    }
 }
