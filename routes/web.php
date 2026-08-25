@@ -16,6 +16,7 @@ use App\Http\Controllers\CronJobController;
 use App\Http\Controllers\DomainMappingController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\FileManagerController;
+use App\Http\Controllers\DiskCleanupController;
 
 
 // Installation Routes
@@ -158,4 +159,13 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('file-manager')-
     Route::post('/touch',      [FileManagerController::class, 'touch'])->name('touch');
     Route::post('/rename',     [FileManagerController::class, 'rename'])->name('rename');
     Route::get('/disk-usage',  [FileManagerController::class, 'diskUsage'])->name('disk-usage');
+});
+
+// Disk Cleanup Routes
+Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('disk-cleanup')->name('disk-cleanup.')->group(function () {
+    Route::get('/',           [DiskCleanupController::class, 'index'])->name('index');
+    Route::get('/status',     [DiskCleanupController::class, 'status'])->name('status');
+    Route::post('/cleanup',   [DiskCleanupController::class, 'cleanup'])->name('cleanup');
+    Route::get('/analyze',    [DiskCleanupController::class, 'analyze'])->name('analyze');
+    Route::post('/delete',    [DiskCleanupController::class, 'deleteItem'])->name('delete');
 });
