@@ -48,6 +48,109 @@ class Service extends Model
         return null;
     }
 
+    public function getDatabaseConfig(): array
+    {
+        $config = [
+            'connection' => 'mysql',
+            'host' => '127.0.0.1',
+            'port' => '3306',
+            'database' => '',
+            'username' => '',
+            'password' => '',
+            'has_env' => false,
+            'env_exists' => false,
+            'is_connected' => false,
+            'tables_count' => 0,
+            'size_mb' => 0.0,
+            'status_message' => '',
+        ];
+
+        $envPath = rtrim($this->path, '/') . '/.env';
+        if (file_exists($envPath)) {
+            $config['env_exists'] = true;
+            $content = @file_get_contents($envPath);
+            if ($content !== false) {
+                $lines = explode("\n", $content);
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (empty($line) || str_starts_with($line, '#')) continue;
+                    if (strpos($line, '=') !== false) {
+                        [$key, $val] = explode('=', $line, 2);
+                        $key = trim($key);
+                        $val = trim($val, " \t\n\r\0\x0B\"'");
+                        if ($key === 'DB_CONNECTION') $config['connection'] = $val;
+                        if ($key === 'DB_HOST') $config['host'] = $val;
+                        if ($key === 'DB_PORT') $config['port'] = $val;
+                        if ($key === 'DB_DATABASE') $config['database'] = $val;
+                        if ($key === 'DB_USERNAME') $config['username'] = $val;
+                        if ($key === 'DB_PASSWORD') $config['password'] = $val;
+                    }
+                }
+            }
+        }
+
+        if (empty($config['database'])) {
+            $config['database'] = $this->getDatabaseName() ?? '';
+        }
+
+        if (!empty($config['database'])) {
+            $config['has_env'] = true;
+            try {
+                $host = !empty($config['host']) ? $config['host'] : '127.0.0.1';
+                $port = !empty($config['port']) ? $config['port'] : '3306';
+                $user = $config['username'] ?? 'root';
+                $pass = $config['password'] ?? '';
+                $db   = $config['database'];
+
+                $dsn = "mysql:host={$host};port={$port};dbname={$db};charset=utf8mb4";
+                $pdo = new \PDO($dsn, $user, $pass, [
+                    \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                    \PDO::ATTR_TIMEOUT => 2,
+                ]);
+
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        COUNT(*) as table_count,
+                        ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
+                    FROM information_schema.tables
+                    WHERE table_schema = ?
+                ");
+                $stmt->execute([$db]);
+                $stat = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+                $config['is_connected'] = true;
+                $config['tables_count'] = (int) ($stat['table_count'] ?? 0);
+                $config['size_mb'] = (float) ($stat['size_mb'] ?? 0.0);
+                $config['status_message'] = 'متصل و فعال';
+            } catch (\Throwable $e) {
+                try {
+                    $res = \Illuminate\Support\Facades\DB::select("
+                        SELECT 
+                            COUNT(*) as table_count,
+                            ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
+                        FROM information_schema.tables
+                        WHERE table_schema = ?
+                    ", [$config['database']]);
+
+                    if (!empty($res) && isset($res[0]->table_count)) {
+                        $config['is_connected'] = true;
+                        $config['tables_count'] = (int) ($res[0]->table_count ?? 0);
+                        $config['size_mb'] = (float) ($res[0]->size_mb ?? 0.0);
+                        $config['status_message'] = 'دیتابیس در سرور موجود است';
+                    } else {
+                        $config['status_message'] = 'عدم دسترسی به دیتابیس (' . $e->getMessage() . ')';
+                    }
+                } catch (\Throwable $ex) {
+                    $config['status_message'] = 'خطا در ارتباط: ' . $e->getMessage();
+                }
+            }
+        } else {
+            $config['status_message'] = 'تنظیمات دیتابیس در .env یافت نشد';
+        }
+
+        return $config;
+    }
+
     public function getDbUsage(): int
     {
         $dbName = $this->getDatabaseName();

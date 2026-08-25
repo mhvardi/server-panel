@@ -20,7 +20,7 @@ class BackupTaskController extends Controller
 
     public function index()
     {
-        $services = Service::all()->map(function ($service) {
+        $services = Service::orderByRaw("CASE WHEN type = 'main' THEN 0 ELSE 1 END")->orderBy('id')->get()->map(function ($service) {
             $settings = $this->getBackupSettings($service);
             $service->db_enabled = $settings['db_enabled'] ?? false;
             $service->files_enabled = $settings['files_enabled'] ?? false;

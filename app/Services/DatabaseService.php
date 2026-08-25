@@ -37,32 +37,53 @@ class DatabaseService
      */
     protected function getRootConnection()
     {
-        try {
-            $dsn = "mysql:host={$this->host};port={$this->port};charset=utf8mb4";
-            $pdo = new PDO($dsn, $this->rootUsername, $this->rootPassword, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            ]);
-            return $pdo;
-        } catch (PDOException $e) {
-            Log::error('Database root connection failed: ' . $e->getMessage(), [
-                'host' => $this->host,
-                'port' => $this->port,
-                'username' => $this->rootUsername,
-            ]);
+        $credentials = [
+            // 1. Explicit root credentials from env
+            ['user' => env('MYSQL_ROOT_USERNAME'), 'pass' => env('MYSQL_ROOT_PASSWORD')],
+            // 2. Config database credentials
+            ['user' => config('database.connections.mysql.username'), 'pass' => config('database.connections.mysql.password')],
+            // 3. Env DB credentials
+            ['user' => env('DB_USERNAME'), 'pass' => env('DB_PASSWORD')],
+            // 4. Default root without password
+            ['user' => 'root', 'pass' => ''],
+            // 5. Default root with root password
+            ['user' => 'root', 'pass' => 'root'],
+        ];
 
-            // Provide more helpful error message
-            if (strpos($e->getMessage(), 'Access denied') !== false) {
-                throw new \Exception(
-                    'Access denied to MySQL server. ' .
-                    'Please set MYSQL_ROOT_USERNAME and MYSQL_ROOT_PASSWORD in your .env file. ' .
-                    'The current user (' . $this->rootUsername . ') does not have sufficient privileges. ' .
-                    'Original error: ' . $e->getMessage()
-                );
+        $lastError = null;
+        $attempted = [];
+
+        foreach ($credentials as $cred) {
+            $user = $cred['user'];
+            $pass = $cred['pass'] ?? '';
+            if (empty($user)) continue;
+
+            $key = $user . '::' . $pass;
+            if (isset($attempted[$key])) continue;
+            $attempted[$key] = true;
+
+            try {
+                $dsn = "mysql:host={$this->host};port={$this->port};charset=utf8mb4";
+                $pdo = new PDO($dsn, $user, $pass, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_TIMEOUT => 2,
+                ]);
+                $this->rootUsername = $user;
+                $this->rootPassword = $pass;
+                return $pdo;
+            } catch (PDOException $e) {
+                $lastError = $e;
             }
-
-            throw new \Exception('Could not connect to MySQL server: ' . $e->getMessage());
         }
+
+        Log::warning('Database root connection failed for all attempts: ' . ($lastError ? $lastError->getMessage() : 'unknown'));
+
+        throw new \Exception(
+            'عدم دسترسی مدیریت به سرور MySQL. ' .
+            'برای مدیریت کامل دیتابیس‌های سراسری سرور، متغیرهای MYSQL_ROOT_USERNAME و MYSQL_ROOT_PASSWORD را در فایل .env تنظیم کنید. ' .
+            ($lastError ? '(' . $lastError->getMessage() . ')' : '')
+        );
     }
 
     /**

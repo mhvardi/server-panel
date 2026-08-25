@@ -105,9 +105,13 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
 
     // Database Management Routes
     Route::resource('databases', DatabaseController::class);
+    Route::post('/databases/test-connection', [DatabaseController::class, 'testConnection'])->name('databases.test-connection');
+    Route::get('/databases/service/{service}/backup', [DatabaseController::class, 'downloadServiceSqlBackup'])->name('databases.service-backup');
     Route::post('/databases/user/create', [DatabaseController::class, 'createUser'])->name('databases.user.create');
     Route::post('/databases/user/delete', [DatabaseController::class, 'deleteUser'])->name('databases.user.delete');
     Route::post('/databases/user/password', [DatabaseController::class, 'changePassword'])->name('databases.user.password');
+    Route::post('/databases/user/password-ajax', [DatabaseController::class, 'changePasswordAjax'])->name('databases.user.password.ajax');
+
     Route::post('/databases/privileges/grant', [DatabaseController::class, 'grantPrivileges'])->name('databases.privileges.grant');
     Route::post('/databases/privileges/revoke', [DatabaseController::class, 'revokePrivileges'])->name('databases.privileges.revoke');
 
