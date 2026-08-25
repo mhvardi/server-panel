@@ -51,6 +51,8 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
     // Domain Mapping Routes
     Route::get('/domain-mappings', [DomainMappingController::class, 'index'])->name('domain-mappings.index');
     Route::post('/domain-mappings', [DomainMappingController::class, 'store'])->name('domain-mappings.store');
+    Route::post('/domain-mappings/parked', [DomainMappingController::class, 'storeParked'])->name('domain-mappings.store-parked');
+    Route::post('/domain-mappings/direct', [DomainMappingController::class, 'storeDirect'])->name('domain-mappings.store-direct');
     Route::delete('/domain-mappings/{domainMapping}', [DomainMappingController::class, 'destroy'])->name('domain-mappings.destroy');
     Route::post('/domain-mappings/{domainMapping}/reprovision', [DomainMappingController::class, 'reprovision'])->name('domain-mappings.reprovision');
 

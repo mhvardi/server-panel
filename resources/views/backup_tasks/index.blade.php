@@ -41,7 +41,7 @@
                         <div class="flex justify-between items-center text-sm">
                             <span class="text-gray-500 dark:text-gray-400">آخرین پشتیبان‌گیری:</span>
                             <span class="font-medium text-gray-800 dark:text-gray-200" dir="ltr">
-                                {{ $service->last_backup ? $service->last_backup->format('Y-m-d H:i') : 'هرگز' }}
+                                {{ $service->last_backup ? (is_object($service->last_backup) ? $service->last_backup->format('Y-m-d H:i') : $service->last_backup) : 'هرگز' }}
                             </span>
                         </div>
                         

@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Service;
 use App\Services\CronJobService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
 class BackupTaskController extends Controller
 {
@@ -19,7 +21,7 @@ class BackupTaskController extends Controller
         $services = Service::all()->map(function ($service) {
             $settings = $this->getBackupSettings($service);
             $service->backup_enabled = $settings['enabled'] ?? false;
-            $service->last_backup = $settings['last_backup'] ?? null;
+            $service->last_backup = !empty($settings['last_backup']) ? Carbon::parse($settings['last_backup']) : null;
             return $service;
         });
 
@@ -30,7 +32,11 @@ class BackupTaskController extends Controller
     {
         $settings = $this->getBackupSettings($service);
         $recent_backups = $this->getRecentBackups($service);
-        $last_backup_status = ['status' => 'نامشخص', 'date' => 'هرگز']; // Placeholder
+        
+        $last_backup_status = [
+            'status' => $settings['last_backup_status'] ?? 'نامشخص',
+            'date' => !empty($settings['last_backup']) ? Carbon::parse($settings['last_backup'])->toDateTimeString() : 'هرگز',
+        ];
 
         return view('backup_tasks.settings', compact('service', 'settings', 'recent_backups', 'last_backup_status'));
     }
@@ -52,16 +58,38 @@ class BackupTaskController extends Controller
             'remote_retention' => 'required|integer|min:1',
         ]);
 
+        $existingSettings = $this->getBackupSettings($service);
+
+        // If password is left empty on update, retain existing password
+        if (empty($data['remote_password']) && !empty($existingSettings['remote_password'])) {
+            $data['remote_password'] = $existingSettings['remote_password'];
+        }
+
+        // Preserve previous backup date and status
+        $data['last_backup'] = $existingSettings['last_backup'] ?? null;
+        $data['last_backup_status'] = $existingSettings['last_backup_status'] ?? null;
+
         $this->saveBackupSettings($service, $data);
         $this->updateCronJob($service, $data);
 
-        return redirect()->route('backup_tasks.index')->with('success', 'Backup settings saved for ' . $service->name);
+        return redirect()->route('backup_tasks.index')->with('success', 'تنظیمات پشتیبان‌گیری برای ' . $service->name . ' با موفقیت ذخیره شد.');
     }
 
     public function run(Service $service)
     {
-        \App\Jobs\RunServiceBackupJob::dispatch($service);
-        return back()->with('success', 'Backup job for ' . $service->name . ' has been dispatched.');
+        try {
+            $exitCode = Artisan::call('backup:run-service', ['service_id' => $service->id]);
+            $output = Artisan::output();
+            
+            if ($exitCode === 0) {
+                return back()->with('success', 'عملیات پشتیبان‌گیری با موفقیت انجام شد.' . ($output ? ' ' . trim($output) : ''));
+            } else {
+                return back()->with('error', 'خطا در اجرای پشتیبان‌گیری: ' . trim($output));
+            }
+        } catch (\Exception $e) {
+            Log::error('Backup execution failed for service ' . $service->id . ': ' . $e->getMessage());
+            return back()->with('error', 'خطا در پشتیبان‌گیری: ' . $e->getMessage());
+        }
     }
 
     public function testFtp(Request $request)
@@ -73,9 +101,9 @@ class BackupTaskController extends Controller
         ]);
 
         try {
-            $conn = @ftp_connect($request->remote_host, 21, 5);
+            $conn = @ftp_connect($request->remote_host, 21, 10);
             if (!$conn) {
-                return response()->json(['success' => false, 'message' => 'اتصال به سرور FTP برقرار نشد.']);
+                return response()->json(['success' => false, 'message' => 'اتصال به سرور FTP برقرار نشد (هاست یا پورت در دسترس نیست).']);
             }
 
             $login = @ftp_login($conn, $request->remote_user, $request->remote_password);
@@ -84,6 +112,7 @@ class BackupTaskController extends Controller
                 return response()->json(['success' => false, 'message' => 'نام کاربری یا رمز عبور FTP اشتباه است.']);
             }
 
+            ftp_pasv($conn, true);
             @ftp_close($conn);
             return response()->json(['success' => true, 'message' => 'اتصال به سرور FTP با موفقیت انجام شد.']);
         } catch (\Exception $e) {
@@ -108,7 +137,13 @@ class BackupTaskController extends Controller
         $fileName = 'db_' . $dbName . '_' . date('Y-m-d_H-i-s') . '.sql.gz';
         $filePath = $backupDir . '/' . $fileName;
 
-        $cmd = "mysqldump " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
+        $dbHost = config('database.connections.mysql.host', '127.0.0.1');
+        $dbPort = config('database.connections.mysql.port', '3306');
+        $dbUser = config('database.connections.mysql.username', 'root');
+        $dbPass = config('database.connections.mysql.password', '');
+
+        $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
+        $cmd = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
         $process = \Illuminate\Support\Facades\Process::run($cmd);
         
         if ($process->successful()) {
@@ -130,7 +165,7 @@ class BackupTaskController extends Controller
 
         $servicePath = $service->path;
         
-        $cmd = "cd " . escapeshellarg($servicePath) . " && zip -r " . escapeshellarg($filePath) . " .";
+        $cmd = "cd " . escapeshellarg($servicePath) . " && zip -r " . escapeshellarg($filePath) . " . -x '*.git*' '*node_modules*' '*.backup*'";
         $process = \Illuminate\Support\Facades\Process::run($cmd);
         
         if ($process->successful()) {
@@ -197,7 +232,10 @@ class BackupTaskController extends Controller
     {
         $settingsPath = $this->getSettingsPath($service);
         if (File::exists($settingsPath)) {
-            return json_decode(File::get($settingsPath), true);
+            $settings = json_decode(File::get($settingsPath), true);
+            if (is_array($settings)) {
+                return $settings;
+            }
         }
 
         return [
@@ -207,13 +245,14 @@ class BackupTaskController extends Controller
             'db_name' => '',
             'cron_expression' => '0 2 * * *',
             'remote_enabled' => false,
-            'remote_host' => '',
-            'remote_user' => '',
-            'remote_password' => '',
-            'remote_path' => '/',
+            'remote_host' => '80.249.115.114',
+            'remote_user' => 'mhvardi@backup.vardicrm.ir',
+            'remote_password' => 'pqDd2PZ1V8Pkq6r3',
+            'remote_path' => '/public_html',
             'local_retention' => 7,
-            'remote_retention' => 30,
+            'remote_retention' => 2,
             'last_backup' => null,
+            'last_backup_status' => 'نامشخص',
         ];
     }
 
