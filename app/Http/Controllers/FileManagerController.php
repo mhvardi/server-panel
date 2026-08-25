@@ -450,46 +450,72 @@ class FileManagerController extends Controller
     // ──────────────────────────────────────────────
 
     /**
-     * مسیر نسبی (از /var/www) را به مسیر واقعی تبدیل کرده و
-     * اطمینان حاصل می‌کند که داخل $baseDir است.
+     * مسیر نسبی (از /var/www) یا مطلق را به مسیر تمیز تبدیل کرده و
+     * اطمینان حاصل می‌کند که خارج از $baseDir نیست.
      */
     private function safePath(string $path): string
     {
-        // اگر مسیر مطلق و خارج از base بود رد کن
-        if (str_starts_with($path, '/') && !str_starts_with($path, $this->baseDir)) {
+        $base = rtrim($this->baseDir, '/');
+        $trimmed = trim($path);
+
+        // اگر خالی یا اسلش ریشه فایل منیجر بود
+        if ($trimmed === '' || $trimmed === '/' || $trimmed === $base || $trimmed === $base . '/') {
+            return $base;
+        }
+
+        // اگر مسیر به صورت مطلق ارسال شده اما با base شروع نشده
+        // و مسیر شروعش با اسلش است، بررسی می‌کنیم آیا زیرشاخه نسبی است یا مسیر مطلق سیستمی
+        if (str_starts_with($trimmed, '/')) {
+            if (str_starts_with($trimmed, $base . '/') || $trimmed === $base) {
+                $target = $trimmed;
+            } else {
+                // اگر مثلاً /service یا /html فرستاده شده که زیرشاخه /var/www است
+                $target = $base . '/' . ltrim($trimmed, '/');
+            }
+        } else {
+            $target = $base . '/' . $trimmed;
+        }
+
+        // نرمال‌سازی مسیر (حل .. و . و // بدون وابستگی به فایل‌سیستم محلی)
+        $normalized = $this->normalizePath($target);
+
+        // اطمینان از اینکه مسیر در محدوده /var/www است
+        if ($normalized !== $base && !str_starts_with($normalized, $base . '/')) {
             throw new \Exception('دسترسی به خارج از مسیر مجاز ممنوع است.');
         }
 
-        // تبدیل مسیر نسبی به مطلق
-        if (!str_starts_with($path, $this->baseDir)) {
-            $path = $this->baseDir . '/' . ltrim($path, '/');
+        // اگر فایل یا پوشه وجود دارد، بررسی symlink به خارج از محدوده
+        if (file_exists($normalized)) {
+            $real = realpath($normalized);
+            $realBase = realpath($base) ?: $base;
+            if ($real && $realBase && $real !== $realBase && !str_starts_with($real, $realBase . '/')) {
+                throw new \Exception('دسترسی به خارج از مسیر مجاز ممنوع است.');
+            }
         }
 
-        // حذف path traversal sequences
-        $path = str_replace(['../', '..\\', '..'], '', $path);
+        return $normalized;
+    }
 
-        // نرمالیزه کردن اسلش‌های تکراری
-        $path = preg_replace('#/{2,}#', '/', $path);
-        $path = rtrim($path, '/');
+    /**
+     * حل کردن .. و . و اسلش‌های اضافی به شکل قطعی
+     */
+    private function normalizePath(string $path): string
+    {
+        $path = str_replace('\\', '/', $path);
+        $isAbsolute = str_starts_with($path, '/');
+        $parts = array_filter(explode('/', $path), fn($part) => $part !== '' && $part !== '.');
+        $resolved = [];
 
-        // اگر مسیر وجود دارد realpath استفاده کن، وگرنه parent را چک کن
-        if (file_exists($path)) {
-            $real = realpath($path);
-        } else {
-            $parentReal = realpath(dirname($path));
-            $real = $parentReal ? $parentReal . '/' . basename($path) : false;
+        foreach ($parts as $part) {
+            if ($part === '..') {
+                array_pop($resolved);
+            } else {
+                $resolved[] = $part;
+            }
         }
 
-        if ($real === false) {
-            // اگر parent هم وجود ندارد، فقط path traversal check کن
-            $real = $path;
-        }
-
-        if (!str_starts_with($real, $this->baseDir)) {
-            throw new \Exception('دسترسی غیر مجاز به مسیر خارجی.');
-        }
-
-        return $real;
+        $result = ($isAbsolute ? '/' : '') . implode('/', $resolved);
+        return $result === '' ? '/' : $result;
     }
 
     /**
@@ -497,8 +523,9 @@ class FileManagerController extends Controller
      */
     private function toRelative(string $path): string
     {
-        if (str_starts_with($path, $this->baseDir)) {
-            $rel = substr($path, strlen($this->baseDir));
+        $base = rtrim($this->baseDir, '/');
+        if (str_starts_with($path, $base)) {
+            $rel = substr($path, strlen($base));
             return $rel === '' ? '/' : $rel;
         }
         return $path;
