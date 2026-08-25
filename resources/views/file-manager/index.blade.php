@@ -193,10 +193,10 @@
     </div>
 
     {{-- ─── TAB: Disk Analytics ─────────────────────────────── --}}
-    <div x-show="activeTab === 'analytics'" x-cloak>
+    <div x-show="activeTab === 'analytics'" x-cloak class="space-y-5">
 
         {{-- Disk Overview Cards --}}
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6" x-show="diskData">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4" x-show="diskData">
             <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
                 <p class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">حجم کل دیسک</p>
                 <p class="text-3xl font-black text-gray-800 dark:text-gray-100" x-text="diskData?.disk_total_human ?? '—'"></p>
@@ -206,7 +206,7 @@
                 <p class="text-3xl font-black text-red-600 dark:text-red-400" x-text="diskData?.disk_used_human ?? '—'"></p>
                 <div class="mt-3 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div class="bg-red-500 h-2 rounded-full transition-all duration-700"
-                         :style="'width:' + (diskData ? Math.round(diskData.disk_used / diskData.disk_total * 100) : 0) + '%'"></div>
+                         :style="'width:' + (diskData && diskData.disk_total > 0 ? Math.round(diskData.disk_used / diskData.disk_total * 100) : 0) + '%'"></div>
                 </div>
             </div>
             <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm">
@@ -215,84 +215,179 @@
             </div>
         </div>
 
-        {{-- Disk Usage Table --}}
-        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-            <div class="px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                <h2 class="font-bold text-gray-800 dark:text-gray-200 text-sm">مصرف فضا در <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded text-xs" x-text="currentPath || '/'"></code></h2>
-                <button @click="loadDiskUsage()" class="text-xs text-indigo-600 hover:underline font-semibold flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" :class="diskLoading ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                    بروزرسانی
-                </button>
-            </div>
-
-            {{-- Loading --}}
-            <div x-show="diskLoading" class="flex items-center justify-center py-16 text-gray-400">
-                <svg class="w-6 h-6 animate-spin ml-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                در حال آنالیز (ممکن است چند ثانیه طول بکشد)...
-            </div>
-
-            <div x-show="!diskLoading && diskData">
-                {{-- بار گرافیکی (Bar Chart ساده) --}}
-                <div class="p-5 border-b border-gray-100 dark:border-gray-700">
-                    <template x-for="item in (diskData?.items ?? []).slice(0, 10)" :key="item.name">
-                        <div class="mb-3">
-                            <div class="flex items-center justify-between mb-1 text-sm">
-                                <div class="flex items-center gap-2">
-                                    <template x-if="item.type === 'dir'">
-                                        <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
-                                    </template>
-                                    <template x-if="item.type === 'file'">
-                                        <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                                    </template>
-                                    <span class="font-medium text-gray-700 dark:text-gray-300" x-text="item.name"></span>
-                                </div>
-                                <span class="text-xs font-bold text-gray-500 dark:text-gray-400" x-text="item.human"></span>
-                            </div>
-                            <div class="bg-gray-100 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
-                                <div class="h-2.5 rounded-full transition-all duration-700"
-                                     :class="item.type === 'dir' ? 'bg-amber-500' : 'bg-blue-500'"
-                                     :style="'width:' + diskItemPercent(item) + '%'"></div>
-                            </div>
-                        </div>
+        {{-- Disk Usage Card & Navigation --}}
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col">
+            
+            {{-- Toolbar & Breadcrumb for Analytics --}}
+            <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gray-50/50 dark:bg-gray-800/50">
+                
+                {{-- Breadcrumbs in Analytics --}}
+                <div class="flex items-center gap-1.5 flex-wrap text-sm min-w-0">
+                    <span class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider ml-1">مسیر آنالیز:</span>
+                    <button @click="navigateAnalytics('/')" class="font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex-shrink-0 flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                        /var/www
+                    </button>
+                    <template x-for="(crumb, idx) in analyticsBreadcrumbs" :key="idx">
+                        <span class="flex items-center gap-1">
+                            <svg class="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                            <button @click="navigateAnalytics(crumb.path)"
+                                    :class="idx === analyticsBreadcrumbs.length - 1 ? 'text-gray-800 dark:text-gray-200 font-black' : 'text-indigo-600 dark:text-indigo-400 hover:underline font-medium'"
+                                    class="truncate max-w-[150px]" x-text="crumb.name"></button>
+                        </span>
                     </template>
                 </div>
 
-                {{-- جدول کامل --}}
+                {{-- Filters, Search & Sorting --}}
+                <div class="flex items-center gap-2 flex-wrap flex-shrink-0">
+                    {{-- Search --}}
+                    <div class="relative">
+                        <input x-model="analyticsSearch" type="text" placeholder="فیلتر نام..."
+                               class="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1.5 pr-7 w-36 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 dark:text-gray-300">
+                        <svg class="w-3.5 h-3.5 absolute right-2 top-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    </div>
+
+                    {{-- Sort Dropdown --}}
+                    <div class="flex items-center gap-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-2 py-1 text-xs">
+                        <span class="text-gray-400">مرتب‌سازی:</span>
+                        <select x-model="analyticsSortBy" class="bg-transparent text-gray-700 dark:text-gray-200 font-bold focus:outline-none cursor-pointer">
+                            <option value="size_desc">حجم (بیشترین به کمترین)</option>
+                            <option value="size_asc">حجم (کمترین به بیشترین)</option>
+                            <option value="name_asc">نام (الف تا ی)</option>
+                            <option value="name_desc">نام (ی تا الف)</option>
+                        </select>
+                    </div>
+
+                    {{-- Refresh Button --}}
+                    <button @click="loadDiskUsage(analyticsPath)" class="px-3 py-1.5 text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-xl border border-indigo-200 dark:border-indigo-800/60 flex items-center gap-1.5 transition-colors">
+                        <svg class="w-3.5 h-3.5" :class="diskLoading ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        آنالیز مجدد
+                    </button>
+                </div>
+            </div>
+
+            {{-- Loading State --}}
+            <div x-show="diskLoading" class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
+                <svg class="w-8 h-8 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                <span class="text-sm font-medium">در حال محاسبه حجم پوشه‌ها با <code class="font-mono text-xs">du</code> (لطفاً کمی صبر کنید)...</span>
+            </div>
+
+            {{-- Main Content when loaded --}}
+            <div x-show="!diskLoading && diskData">
+
+                {{-- Empty Folder --}}
+                <template x-if="sortedAnalyticsItems.length === 0">
+                    <div class="text-center py-16 text-gray-400 text-sm">
+                        موردی در این مسیر یافت نشد.
+                    </div>
+                </template>
+
+                {{-- Visual Top Bars (10 بزرگترین) --}}
+                <template x-if="sortedAnalyticsItems.length > 0">
+                    <div class="p-5 border-b border-gray-100 dark:border-gray-700 bg-gray-50/30 dark:bg-gray-800/30">
+                        <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">نمای گرافیکی آیتم‌های پرحجم:</p>
+                        <div class="space-y-2.5">
+                            <template x-for="item in sortedAnalyticsItems.slice(0, 8)" :key="item.name">
+                                <div class="group cursor-pointer" @click="item.type === 'dir' ? navigateAnalytics(analyticsPath + '/' + item.name) : null">
+                                    <div class="flex items-center justify-between mb-1 text-xs">
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            <template x-if="item.type === 'dir'">
+                                                <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
+                                            </template>
+                                            <template x-if="item.type === 'file'">
+                                                <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                                            </template>
+                                            <span class="font-bold text-gray-800 dark:text-gray-200 group-hover:text-indigo-600 transition-colors truncate" x-text="item.name"></span>
+                                            <span x-show="item.type === 'dir'" class="text-[10px] text-gray-400 dark:text-gray-500 font-normal">(کلیک برای ورود)</span>
+                                        </div>
+                                        <span class="font-mono font-bold text-gray-700 dark:text-gray-300 mr-2 flex-shrink-0" x-text="item.human"></span>
+                                    </div>
+                                    <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                                        <div class="h-2 rounded-full transition-all duration-500"
+                                             :class="item.type === 'dir' ? 'bg-gradient-to-l from-amber-400 to-amber-600' : 'bg-gradient-to-l from-blue-400 to-blue-600'"
+                                             :style="'width:' + diskItemPercent(item) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                {{-- Full Interactive Table --}}
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
-                        <tr class="bg-gray-50 dark:bg-gray-700/50 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                            <th class="px-5 py-3 text-right font-bold">#</th>
-                            <th class="px-5 py-3 text-right font-bold">نام</th>
-                            <th class="px-5 py-3 text-center font-bold">نوع</th>
-                            <th class="px-5 py-3 text-center font-bold">حجم (دقیق)</th>
-                            <th class="px-5 py-3 text-center font-bold">درصد از کل</th>
+                        <tr class="bg-gray-50 dark:bg-gray-700/50 text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                            <th class="px-5 py-3 text-right font-bold w-12">#</th>
+                            <th class="px-5 py-3 text-right font-bold cursor-pointer hover:text-indigo-600 transition-colors" @click="toggleSort('name')">
+                                <div class="flex items-center gap-1">
+                                    <span>نام آیتم</span>
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+                                </div>
+                            </th>
+                            <th class="px-5 py-3 text-center font-bold w-24">نوع</th>
+                            <th class="px-5 py-3 text-center font-bold w-36 cursor-pointer hover:text-indigo-600 transition-colors" @click="toggleSort('size')">
+                                <div class="flex items-center justify-center gap-1">
+                                    <span>حجم</span>
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+                                </div>
+                            </th>
+                            <th class="px-5 py-3 text-center font-bold w-32">درصد از این مسیر</th>
+                            <th class="px-5 py-3 text-center font-bold w-32">عملیات</th>
                         </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-50 dark:divide-gray-700/50">
-                        <template x-for="(item, idx) in (diskData?.items ?? [])" :key="item.name">
-                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
-                                <td class="px-5 py-3 text-gray-400 text-xs" x-text="idx + 1"></td>
+                        <template x-for="(item, idx) in sortedAnalyticsItems" :key="item.name">
+                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors group">
+                                <td class="px-5 py-3 text-gray-400 text-xs font-mono" x-text="idx + 1"></td>
                                 <td class="px-5 py-3">
                                     <div class="flex items-center gap-2">
                                         <template x-if="item.type === 'dir'">
-                                            <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
+                                            <svg class="w-5 h-5 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
                                         </template>
                                         <template x-if="item.type === 'file'">
-                                            <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                                            <svg class="w-5 h-5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                                         </template>
-                                        <span class="font-medium text-gray-800 dark:text-gray-200" x-text="item.name"></span>
+
+                                        {{-- اگر پوشه است، کلیک روی نام وارد آن پوشه در آنالیز می‌شود --}}
+                                        <template x-if="item.type === 'dir'">
+                                            <button @click="navigateAnalytics(analyticsPath + '/' + item.name)"
+                                                    class="font-bold text-gray-800 dark:text-gray-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-right flex items-center gap-1 group-hover:underline">
+                                                <span x-text="item.name"></span>
+                                                <svg class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                                            </button>
+                                        </template>
+                                        <template x-if="item.type === 'file'">
+                                            <span class="font-medium text-gray-800 dark:text-gray-200" x-text="item.name"></span>
+                                        </template>
                                     </div>
                                 </td>
                                 <td class="px-5 py-3 text-center">
-                                    <span class="text-xs px-2 py-0.5 rounded-full"
+                                    <span class="text-xs px-2.5 py-0.5 rounded-full font-medium"
                                           :class="item.type === 'dir' ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400' : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'"
                                           x-text="item.type === 'dir' ? 'پوشه' : 'فایل'">
                                     </span>
                                 </td>
-                                <td class="px-5 py-3 text-center font-mono text-xs text-gray-600 dark:text-gray-400" x-text="item.human"></td>
-                                <td class="px-5 py-3 text-center text-xs text-gray-500 dark:text-gray-400"
+                                <td class="px-5 py-3 text-center font-mono font-bold text-xs text-gray-800 dark:text-gray-200" x-text="item.human"></td>
+                                <td class="px-5 py-3 text-center text-xs text-gray-500 dark:text-gray-400 font-mono"
                                     x-text="diskData ? diskItemPercent(item).toFixed(1) + '%' : '—'">
+                                </td>
+                                <td class="px-5 py-3 text-center">
+                                    <div class="flex items-center justify-center gap-1">
+                                        {{-- دکمه رفتن به مرورگر فایل --}}
+                                        <button @click="openInBrowser(analyticsPath + (item.type === 'dir' ? '/' + item.name : ''))"
+                                                title="نمایش در مرورگر فایل"
+                                                class="p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 transition-colors">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                        </button>
+
+                                        {{-- دکمه حذف مستقیم --}}
+                                        <button @click="deleteFromAnalytics(analyticsPath + '/' + item.name, item.name, item.type)"
+                                                title="حذف این مورد"
+                                                class="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/40 text-red-500 transition-colors">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         </template>
@@ -432,9 +527,12 @@ function fileManager() {
         renameItem:      null,
         renameNewName:   '',
 
-        // Analytics
+        // Analytics State
+        analyticsPath:   '/',
         diskData:        null,
         diskLoading:     false,
+        analyticsSearch: '',
+        analyticsSortBy: 'size_desc',
 
         // ───────────────────────────────────────
         init() {
@@ -453,10 +551,49 @@ function fileManager() {
             }));
         },
 
+        get analyticsBreadcrumbs() {
+            if (!this.analyticsPath || this.analyticsPath === '/') return [];
+            const parts = this.analyticsPath.replace(/^\//, '').split('/');
+            return parts.map((part, idx) => ({
+                name: part,
+                path: '/' + parts.slice(0, idx + 1).join('/'),
+            }));
+        },
+
         get filteredItems() {
             if (!this.searchQuery.trim()) return this.items;
             const q = this.searchQuery.toLowerCase();
             return this.items.filter(i => i.name.toLowerCase().includes(q));
+        },
+
+        get sortedAnalyticsItems() {
+            if (!this.diskData || !this.diskData.items) return [];
+            
+            let list = [...this.diskData.items];
+
+            // Search filter
+            if (this.analyticsSearch.trim()) {
+                const q = this.analyticsSearch.toLowerCase();
+                list = list.filter(i => i.name.toLowerCase().includes(q));
+            }
+
+            // Sorting
+            switch (this.analyticsSortBy) {
+                case 'size_desc':
+                    list.sort((a, b) => (b.size || 0) - (a.size || 0));
+                    break;
+                case 'size_asc':
+                    list.sort((a, b) => (a.size || 0) - (b.size || 0));
+                    break;
+                case 'name_asc':
+                    list.sort((a, b) => a.name.localeCompare(b.name));
+                    break;
+                case 'name_desc':
+                    list.sort((a, b) => b.name.localeCompare(a.name));
+                    break;
+            }
+
+            return list;
         },
 
         // ───────────────────────────────────────
@@ -688,17 +825,24 @@ function fileManager() {
         },
 
         // ───────────────────────────────────────
-        //  Disk Analytics
+        //  Disk Analytics Methods
         // ───────────────────────────────────────
-        async loadDiskUsage() {
+        async loadDiskUsage(path = null) {
+            if (path !== null) {
+                this.analyticsPath = path || '/';
+            } else if (!this.analyticsPath) {
+                this.analyticsPath = '/';
+            }
+
             this.diskLoading = true;
             try {
-                const res  = await fetch(`{{ route('file-manager.disk-usage') }}?path=${encodeURIComponent(this.currentPath)}`, {
+                const res  = await fetch(`{{ route('file-manager.disk-usage') }}?path=${encodeURIComponent(this.analyticsPath)}`, {
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await res.json();
                 if (data.ok) {
                     this.diskData = data;
+                    this.analyticsPath = data.path;
                 } else {
                     this.notify('error', data.message || 'خطا در دریافت آمار');
                 }
@@ -709,10 +853,57 @@ function fileManager() {
             }
         },
 
+        navigateAnalytics(path) {
+            this.analyticsSearch = '';
+            this.loadDiskUsage(path);
+        },
+
+        toggleSort(field) {
+            if (field === 'size') {
+                this.analyticsSortBy = this.analyticsSortBy === 'size_desc' ? 'size_asc' : 'size_desc';
+            } else if (field === 'name') {
+                this.analyticsSortBy = this.analyticsSortBy === 'name_asc' ? 'name_desc' : 'name_asc';
+            }
+        },
+
+        async deleteFromAnalytics(path, name, type) {
+            const typeText = type === 'dir' ? 'پوشه' : 'فایل';
+            if (!confirm(`آیا از حذف دائمی این ${typeText} ("${name}") مطمئن هستید؟ این عمل غیرقابل بازگشت است.`)) return;
+
+            try {
+                const res  = await fetch(`{{ route('file-manager.delete') }}`, {
+                    method:  'POST',
+                    headers: {
+                        'Content-Type':     'application/json',
+                        'X-CSRF-TOKEN':     document.querySelector('meta[name="csrf-token"]').content,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({ path }),
+                });
+                const data = await res.json();
+
+                if (data.ok) {
+                    this.notify('success', `${typeText} با موفقیت حذف شد.`);
+                    // بازخوانی آمار و همچنین بروزرسانی مرورگر فایل
+                    this.loadDiskUsage(this.analyticsPath);
+                } else {
+                    this.notify('error', data.message || 'خطا در حذف');
+                }
+            } catch (e) {
+                this.notify('error', 'خطا در ارتباط با سرور');
+            }
+        },
+
+        openInBrowser(path) {
+            this.activeTab = 'browser';
+            this.navigateTo(path);
+        },
+
         diskItemPercent(item) {
             if (!this.diskData || !this.diskData.items?.length) return 0;
-            const max = this.diskData.items[0]?.size || 1;
-            return Math.round((item.size / max) * 100);
+            // حداکثر حجم بین آیتم‌ها برای ترسیم مقیاس میله‌ها
+            const max = Math.max(...this.diskData.items.map(i => i.size || 0)) || 1;
+            return Math.min(100, Math.round((item.size / max) * 100));
         },
 
         // ───────────────────────────────────────
