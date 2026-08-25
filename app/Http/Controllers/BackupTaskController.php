@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\Service;
 use App\Services\CronJobService;
 use App\Services\FtpBackupDriver;
+use App\Jobs\RunServiceBackupJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
 use Carbon\Carbon;
 
@@ -31,7 +33,12 @@ class BackupTaskController extends Controller
             return $service;
         });
 
-        return view('backup_tasks.index', compact('services'));
+        $queueCount = 0;
+        try {
+            $queueCount = DB::table('jobs')->where('queue', 'backups')->count();
+        } catch (\Exception $e) {}
+
+        return view('backup_tasks.index', compact('services', 'queueCount'));
     }
 
     public function settings(Service $service)
@@ -46,7 +53,12 @@ class BackupTaskController extends Controller
             'ftp_uploaded' => $settings['last_ftp_uploaded'] ?? false,
         ];
 
-        return view('backup_tasks.settings', compact('service', 'settings', 'recent_backups', 'last_backup_status'));
+        $queueCount = 0;
+        try {
+            $queueCount = DB::table('jobs')->where('queue', 'backups')->count();
+        } catch (\Exception $e) {}
+
+        return view('backup_tasks.settings', compact('service', 'settings', 'recent_backups', 'last_backup_status', 'queueCount'));
     }
 
     public function saveSettings(Request $request, Service $service)
@@ -115,32 +127,36 @@ class BackupTaskController extends Controller
         return redirect()->route('backup_tasks.settings', $service->id)->with('success', 'تنظیمات پشتیبان‌گیری هوشمند با موفقیت ذخیره شد.');
     }
 
+    /**
+     * Run backup via Background Queue (Sequential, Non-blocking, No 504 Timeout)
+     */
     public function run(Service $service, Request $request)
     {
-        try {
-            $args = ['service_id' => $service->id];
-            if ($request->has('type')) {
-                $args['--type'] = $request->type;
+        $type = $request->type ?? 'all';
+
+        // Synchronous debug option
+        if ($request->has('sync')) {
+            try {
+                $args = ['service_id' => $service->id, '--type' => $type];
+                if ($request->has('ftp_only')) $args['--ftp-only'] = true;
+                if ($request->has('dry_run')) $args['--dry-run'] = true;
+                Artisan::call('backup:run-service', $args);
+                return back()->with('success', 'عملیات بکاپ همگام انجام شد.');
+            } catch (\Exception $e) {
+                return back()->with('error', 'خطا: ' . $e->getMessage());
             }
-            if ($request->has('ftp_only')) {
-                $args['--ftp-only'] = true;
-            }
-            if ($request->has('dry_run')) {
-                $args['--dry-run'] = true;
-            }
-            
-            $exitCode = Artisan::call('backup:run-service', $args);
-            
-            if ($exitCode === 0) {
-                return back()->with('success', 'عملیات بکاپ با موفقیت انجام شد.');
-            } else {
-                return back()->with('error', 'خطا در اجرای پشتیبان‌گیری.');
-            }
-        } catch (\Exception $e) {
-            return back()->with('error', 'خطا در پشتیبان‌گیری: ' . $e->getMessage());
         }
+
+        // Dispatch to Sequential Queue
+        RunServiceBackupJob::dispatch($service, $type)->onQueue('backups');
+
+        $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های سورس', 'all' => 'کامل (دیتابیس + فایل‌ها)'];
+        return back()->with('success', "عملیات بکاپ «{$typeLabels[$type]}» با موفقیت در صف پس‌زمینه قرار گرفت و بدون فشار به سرور و پهنای باند، به نوبت اجرا خواهد شد.");
     }
 
+    /**
+     * Manual Backup Handler
+     */
     public function manualBackup(Request $request, Service $service)
     {
         $request->validate([
@@ -162,6 +178,16 @@ class BackupTaskController extends Controller
             }
         }
 
+        $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های سورس', 'full' => 'کامل (دیتابیس + فایل‌ها)'];
+        $targetLabels = ['local' => 'سرور محلی', 'ftp' => 'هاست FTP مرکزی'];
+
+        // If target is Local or FTP, dispatch to queue so web connection never hangs (No 504 Timeout)
+        if ($target === 'local' || $target === 'ftp') {
+            RunServiceBackupJob::dispatch($service, $type, $target)->onQueue('backups');
+            return back()->with('success', "درخواست بکاپ «{$typeLabels[$type]}» ({$targetLabels[$target]}) با موفقیت در صف پس‌زمینه قرار گرفت و به نوبت انجام می‌شود.");
+        }
+
+        // Direct Download: Generate directly and stream to browser
         try {
             $filePath = null;
             $fileName = null;
@@ -188,84 +214,24 @@ class BackupTaskController extends Controller
                 throw new \Exception('فایل بکاپ ایجاد نشد یا خالی است.');
             }
 
-            $sizeMb = round(filesize($filePath) / 1024 / 1024, 2);
-
-            if (!env('BACKUP_MOCK_ENABLED', false)) {
-                @exec("chown -R www-data:www-data " . escapeshellarg($backupDir) . " 2>/dev/null");
-            }
-
-            if ($target === 'download') {
-                return response()->download($filePath, $fileName)->deleteFileAfterSend(true);
-            }
-
-            if ($target === 'ftp') {
-                $ftp = new FtpBackupDriver(
-                    $settings['remote_host'],
-                    21,
-                    $settings['remote_user'],
-                    $settings['remote_password']
-                );
-                $ftp->connect();
-                $remoteDir = rtrim($settings['remote_path'] ?? '/public_html', '/') . '/' . ($service->domain ?: $service->name);
-                $ftp->ensureRemoteDir($remoteDir);
-                $ftp->upload($filePath, $remoteDir . '/' . $fileName);
-
-                // Targeted prefix retention
-                if ($type === 'db') {
-                    $retentionDays = intval($settings['db_remote_retention_days'] ?? 3);
-                    $ftp->cleanOldBackupsByDays($remoteDir, $retentionDays, 'db_');
-                } elseif ($type === 'files') {
-                    $retentionDays = intval($settings['files_remote_retention_days'] ?? 14);
-                    $ftp->cleanOldBackupsByDays($remoteDir, $retentionDays, 'files_');
-                } else {
-                    $retentionDays = intval($settings['files_remote_retention_days'] ?? 14);
-                    $ftp->cleanOldBackupsByDays($remoteDir, $retentionDays, 'backup_full_');
-                }
-                
-                $ftp->disconnect();
-
-                if (empty($settings['local_enabled'])) {
-                    File::delete($filePath);
-                }
-
-                $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های پروژه', 'full' => 'کامل (دیتابیس + فایل‌ها)'];
-                return back()->with('success', "بکاپ دستی «{$typeLabels[$type]}» با موفقیت به سرور FTP ارسال شد ({$sizeMb} MB).");
-            }
-
-            if ($target === 'local') {
-                if ($type === 'db') {
-                    $localDays = intval($settings['db_local_retention_days'] ?? 3);
-                    $cutoff = now()->subDays($localDays)->getTimestamp();
-                    foreach (File::files($backupDir) as $f) {
-                        if (str_starts_with($f->getFilename(), 'db_') && $f->getMTime() < $cutoff) {
-                            File::delete($f->getPathname());
-                        }
-                    }
-                } elseif ($type === 'files') {
-                    $localDays = intval($settings['files_local_retention_days'] ?? 14);
-                    $cutoff = now()->subDays($localDays)->getTimestamp();
-                    foreach (File::files($backupDir) as $f) {
-                        if (str_starts_with($f->getFilename(), 'files_') && $f->getMTime() < $cutoff) {
-                            File::delete($f->getPathname());
-                        }
-                    }
-                } else {
-                    $localDays = intval($settings['files_local_retention_days'] ?? 14);
-                    $cutoff = now()->subDays($localDays)->getTimestamp();
-                    foreach (File::files($backupDir) as $f) {
-                        if (str_starts_with($f->getFilename(), 'backup_full_') && $f->getMTime() < $cutoff) {
-                            File::delete($f->getPathname());
-                        }
-                    }
-                }
-
-                $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های پروژه', 'full' => 'کامل (دیتابیس + فایل‌ها)'];
-                return back()->with('success', "بکاپ دستی «{$typeLabels[$type]}» با موفقیت در سرور محلی ذخیره شد ({$sizeMb} MB).");
-            }
+            return response()->download($filePath, $fileName)->deleteFileAfterSend(true);
 
         } catch (\Exception $e) {
-            return back()->with('error', 'خطا در عملیات بکاپ دستی: ' . $e->getMessage());
+            return back()->with('error', 'خطا در دانلود بکاپ: ' . $e->getMessage());
         }
+    }
+
+    public function queueStatus()
+    {
+        $pending = 0;
+        try {
+            $pending = DB::table('jobs')->where('queue', 'backups')->count();
+        } catch (\Exception $e) {}
+
+        return response()->json([
+            'pending_jobs' => $pending,
+            'message' => $pending > 0 ? "تعداد {$pending} بکاپ در صف انتظار قرار دارد." : "صف بکاپ خالی است.",
+        ]);
     }
 
     private function createDbBackup(string $dbName, string $destPath): void
@@ -300,7 +266,7 @@ class BackupTaskController extends Controller
             'tar', '-czf', $destPath, '-C', $servicePath,
             '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
         ]);
-        $process->setTimeout(300);
+        $process->setTimeout(600);
         $process->mustRun();
     }
 
@@ -311,14 +277,14 @@ class BackupTaskController extends Controller
         $timestamp = now()->format('Y-m-d_H-i-s');
         $tempFiles = [];
 
-        // 1. Files tar
+        // 1. Files tar (excluding vendor & node_modules)
         $filesTar = "{$backupDir}/temp_files_{$timestamp}.tar";
         $tempFiles[] = $filesTar;
         $process = new Process([
             'tar', '-cf', $filesTar, '-C', $servicePath,
             '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
         ]);
-        $process->setTimeout(300);
+        $process->setTimeout(600);
         $process->mustRun();
 
         // 2. DB dump
@@ -343,14 +309,14 @@ class BackupTaskController extends Controller
             }
         }
 
-        // 3. Final archive
+        // 3. Final tar.gz archive
         try {
             $tarCmd = ['tar', '-czf', $destPath, '-C', $backupDir];
             foreach ($tempFiles as $tf) {
                 $tarCmd[] = basename($tf);
             }
             $p = new Process($tarCmd);
-            $p->setTimeout(300);
+            $p->setTimeout(600);
             $p->mustRun();
         } finally {
             foreach ($tempFiles as $tf) {
@@ -411,7 +377,7 @@ class BackupTaskController extends Controller
     private function updateCronJobs(Service $service, array $settings)
     {
         try {
-            // 1. Database Backup Cron
+            // 1. Database Backup Cron (Dispatches via queue or artisan)
             $dbCronName = 'backup-service-' . $service->id . '-db';
             $dbCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=db";
             $existingDbJob = $this->cron->findJobByName($dbCronName);
@@ -492,7 +458,6 @@ class BackupTaskController extends Controller
             if (File::exists($settingsPath) && is_readable($settingsPath)) {
                 $settings = json_decode(File::get($settingsPath), true);
                 if (is_array($settings)) {
-                    // Backward compatibility mappings
                     $settings['db_enabled'] = $settings['db_enabled'] ?? ($settings['include_db'] ?? true);
                     $settings['db_cron_expression'] = $settings['db_cron_expression'] ?? ($settings['cron_expression'] ?? '0 2 * * *');
                     $settings['db_local_retention_days'] = $settings['db_local_retention_days'] ?? ($settings['local_retention_days'] ?? 3);

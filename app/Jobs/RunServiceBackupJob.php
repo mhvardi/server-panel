@@ -15,13 +15,43 @@ class RunServiceBackupJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct(public Service $service)
-    {
+    /**
+     * Timeout after 30 minutes (prevents killing long-running backups)
+     */
+    public int $timeout = 1800;
+
+    /**
+     * Number of attempts
+     */
+    public int $tries = 1;
+
+    public function __construct(
+        public Service $service,
+        public string $type = 'all',
+        public ?string $target = null
+    ) {
+        $this->onQueue('backups');
     }
 
     public function handle(): void
     {
-        Log::info("Running backup job for service ID: {$this->service->id} ({$this->service->name})");
-        Artisan::call('backup:run-service', ['service_id' => $this->service->id]);
+        Log::info("Starting queued sequential backup for service: {$this->service->name} (Type: {$this->type}, Target: {$this->target})");
+
+        $params = [
+            'service_id' => $this->service->id,
+            '--type' => $this->type,
+        ];
+
+        if ($this->target === 'ftp') {
+            $params['--ftp-only'] = false;
+        }
+
+        try {
+            $exitCode = Artisan::call('backup:run-service', $params);
+            Log::info("Queued backup job finished for service {$this->service->name} with exit code: {$exitCode}");
+        } catch (\Throwable $e) {
+            Log::error("Queued backup job failed for service {$this->service->name}: " . $e->getMessage());
+            throw $e;
+        }
     }
 }

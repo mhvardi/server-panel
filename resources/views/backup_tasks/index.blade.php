@@ -68,11 +68,19 @@
 
         <div class="bg-white dark:bg-gray-800/90 rounded-2xl p-4 border border-gray-200/80 dark:border-gray-700/60 shadow-sm flex items-center justify-between">
             <div>
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">متصل به FTP مرکزی</p>
-                <p class="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">{{ $services->where('remote_enabled', true)->count() }}</p>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">وضعیت صف پردازش</p>
+                <div class="flex items-center gap-1.5 mt-1">
+                    @if($queueCount > 0)
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                        <p class="text-lg font-black text-amber-600 dark:text-amber-400">{{ $queueCount }} در نوبت</p>
+                    @else
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        <p class="text-base font-black text-emerald-600 dark:text-emerald-400">صف آزاد (آماده)</p>
+                    @endif
+                </div>
             </div>
-            <div class="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+            <div class="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
             </div>
         </div>
     </div>

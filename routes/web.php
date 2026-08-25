@@ -62,6 +62,7 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
     Route::post('/backup-tasks/{service}/settings', [BackupTaskController::class, 'saveSettings'])->name('backup_tasks.save_settings');
     Route::post('/backup-tasks/{service}/run', [BackupTaskController::class, 'run'])->name('backup_tasks.run');
     Route::get('/backup-tasks/{service}/log', [BackupTaskController::class, 'getLog'])->name('backup_tasks.log');
+    Route::get('/backup-tasks/queue-status', [BackupTaskController::class, 'queueStatus'])->name('backup_tasks.queue_status');
     Route::post('/backup-tasks/test-ftp', [BackupTaskController::class, 'testFtp'])->name('backup_tasks.test_ftp');
     Route::post('/backup-tasks/{service}/manual', [BackupTaskController::class, 'manualBackup'])->name('backup_tasks.manual');
     Route::post('/backup-tasks/{service}/db-now', [BackupTaskController::class, 'backupDatabaseNow'])->name('backup_tasks.db_now');
