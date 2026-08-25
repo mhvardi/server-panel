@@ -69,7 +69,11 @@ class BackupTaskController extends Controller
         $data['last_backup'] = $existingSettings['last_backup'] ?? null;
         $data['last_backup_status'] = $existingSettings['last_backup_status'] ?? null;
 
-        $this->saveBackupSettings($service, $data);
+        $saved = $this->saveBackupSettings($service, $data);
+        if (!$saved) {
+            return back()->with('error', 'خطا در ذخیره تنظیمات: عدم دسترسی (Permission Denied). لطفاً روی سرور دسترسی‌های پوشه را با chown اصلاح کنید.');
+        }
+
         $this->updateCronJob($service, $data);
 
         return redirect()->route('backup_tasks.index')->with('success', 'تنظیمات پشتیبان‌گیری برای ' . $service->name . ' با موفقیت ذخیره شد.');
@@ -209,20 +213,45 @@ class BackupTaskController extends Controller
             return [];
         }
 
-        $files = File::files($backupDir);
+        try {
+            $files = File::files($backupDir);
+        } catch (\Exception $e) {
+            Log::warning("Could not read backup directory for service {$service->id}: " . $e->getMessage());
+            return [];
+        }
+        
+        $valid_files = [];
+        foreach ($files as $file) {
+            try {
+                if ($file->isReadable()) {
+                    $valid_files[] = $file;
+                }
+            } catch (\Exception $e) {
+                // Ignore unreadable files
+            }
+        }
+
         $recent_backups = [];
 
         // Sort files by modification time, newest first
-        usort($files, function ($a, $b) {
-            return $b->getMTime() - $a->getMTime();
+        usort($valid_files, function ($a, $b) {
+            try {
+                return $b->getMTime() - $a->getMTime();
+            } catch (\Exception $e) {
+                return 0;
+            }
         });
 
-        foreach (array_slice($files, 0, 5) as $file) {
-            $recent_backups[] = [
-                'name' => $file->getFilename(),
-                'date' => date('Y-m-d H:i:s', $file->getMTime()),
-                'size' => round($file->getSize() / 1024 / 1024, 2) . ' MB',
-            ];
+        foreach (array_slice($valid_files, 0, 5) as $file) {
+            try {
+                $recent_backups[] = [
+                    'name' => $file->getFilename(),
+                    'date' => date('Y-m-d H:i:s', $file->getMTime()),
+                    'size' => round($file->getSize() / 1024 / 1024, 2) . ' MB',
+                ];
+            } catch (\Exception $e) {
+                // Ignore files that fail stat
+            }
         }
 
         return $recent_backups;
@@ -231,11 +260,15 @@ class BackupTaskController extends Controller
     private function getBackupSettings(Service $service): array
     {
         $settingsPath = $this->getSettingsPath($service);
-        if (File::exists($settingsPath)) {
-            $settings = json_decode(File::get($settingsPath), true);
-            if (is_array($settings)) {
-                return $settings;
+        try {
+            if (File::exists($settingsPath) && is_readable($settingsPath)) {
+                $settings = json_decode(File::get($settingsPath), true);
+                if (is_array($settings)) {
+                    return $settings;
+                }
             }
+        } catch (\Exception $e) {
+            Log::warning("Could not read backup settings for service {$service->id}: " . $e->getMessage());
         }
 
         return [
@@ -256,16 +289,21 @@ class BackupTaskController extends Controller
         ];
     }
 
-    private function saveBackupSettings(Service $service, array $settings)
+    private function saveBackupSettings(Service $service, array $settings): bool
     {
         $settingsPath = $this->getSettingsPath($service);
         $dir = dirname($settingsPath);
 
-        if (!File::isDirectory($dir)) {
-            File::makeDirectory($dir, 0755, true);
+        try {
+            if (!File::isDirectory($dir)) {
+                File::makeDirectory($dir, 0755, true);
+            }
+            File::put($settingsPath, json_encode($settings, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Failed to save backup settings for service {$service->id}: " . $e->getMessage());
+            return false;
         }
-
-        File::put($settingsPath, json_encode($settings, JSON_PRETTY_PRINT));
     }
 
     private function getSettingsPath(Service $service): string
