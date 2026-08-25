@@ -264,7 +264,10 @@ class BackupTaskController extends Controller
 
         $process = new Process([
             'tar', '-czf', $destPath, '-C', $servicePath,
-            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
+            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor',
+            '--exclude=storage/app/backups', '--exclude=storage/app/mock-services',
+            '--exclude=storage/framework/cache', '--exclude=storage/framework/sessions',
+            '--exclude=storage/framework/views', '--exclude=storage/logs', '.'
         ]);
         $process->setTimeout(600);
         $process->mustRun();
@@ -277,12 +280,15 @@ class BackupTaskController extends Controller
         $timestamp = now()->format('Y-m-d_H-i-s');
         $tempFiles = [];
 
-        // 1. Files tar (excluding vendor & node_modules)
+        // 1. Files tar (excluding vendor & node_modules & existing backups)
         $filesTar = "{$backupDir}/temp_files_{$timestamp}.tar";
         $tempFiles[] = $filesTar;
         $process = new Process([
             'tar', '-cf', $filesTar, '-C', $servicePath,
-            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
+            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor',
+            '--exclude=storage/app/backups', '--exclude=storage/app/mock-services',
+            '--exclude=storage/framework/cache', '--exclude=storage/framework/sessions',
+            '--exclude=storage/framework/views', '--exclude=storage/logs', '.'
         ]);
         $process->setTimeout(600);
         $process->mustRun();
