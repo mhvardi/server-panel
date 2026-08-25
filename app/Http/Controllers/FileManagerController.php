@@ -186,18 +186,36 @@ class FileManagerController extends Controller
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 403);
         }
 
+        // جلوگیری از حذف ریشه /var/www
+        if ($safePath === rtrim($this->baseDir, '/')) {
+            return response()->json(['ok' => false, 'message' => 'امکان حذف پوشه اصلی /var/www وجود ندارد.'], 403);
+        }
+
         if (!file_exists($safePath)) {
             return response()->json(['ok' => false, 'message' => 'فایل یا پوشه یافت نشد.'], 404);
         }
 
+        $result = false;
+
+        // ابتدا روش مستقیم PHP
         if (is_dir($safePath)) {
             $result = $this->deleteDirectory($safePath);
         } else {
             $result = @unlink($safePath);
         }
 
+        // در صورت عدم دسترسی در سطح PHP، تلاش با sudo rm -rf
+        if (!$result && file_exists($safePath)) {
+            $escaped = escapeshellarg($safePath);
+            $proc = $this->runSudoCommand("sudo rm -rf {$escaped}");
+            $result = $proc && $proc->successful() && !file_exists($safePath);
+        }
+
         if (!$result) {
-            return response()->json(['ok' => false, 'message' => 'خطا در حذف. دسترسی کافی نیست.'], 500);
+            return response()->json([
+                'ok' => false, 
+                'message' => 'خطا در حذف. دسترسی سیستم کافی نیست. لطفاً دسترسی‌های پوشه را با chown/chmod تنظیم کنید یا دسترسی sudo بدون پسورد به کاربر بدهید.'
+            ], 500);
         }
 
         Log::info('FileManager: item deleted', ['path' => $safePath, 'user' => auth()->id()]);
@@ -572,5 +590,35 @@ class FileManagerController extends Controller
         $i = (int) floor(log($bytes, 1024));
         $i = min($i, count($units) - 1);
         return round($bytes / (1024 ** $i), 2) . ' ' . $units[$i];
+    }
+
+    // ──────────────────────────────────────────────
+    //  Helper: اجرای دستورات سیستمی با دسترسی Sudo
+    // ──────────────────────────────────────────────
+
+    private function runSudoCommand(string $command)
+    {
+        $currentUser = trim((string) shell_exec('whoami 2>/dev/null'));
+
+        if ($currentUser === 'root') {
+            $command = preg_replace('/^sudo\s+/', '', $command);
+            return Process::run($command);
+        }
+
+        $sudoTest = Process::run('sudo -n true 2>&1');
+        if ($sudoTest->successful()) {
+            return Process::run($command);
+        }
+
+        $sudoPassword = env('SUDO_PASSWORD');
+        if ($sudoPassword) {
+            $commandWithoutSudo = preg_replace('/^sudo\s+/', '', $command);
+            $escapedPassword = escapeshellarg($sudoPassword);
+            $commandWithPassword = "printf %s {$escapedPassword} | sudo -S " . $commandWithoutSudo;
+            return Process::run($commandWithPassword);
+        }
+
+        $commandWithoutSudo = preg_replace('/^sudo\s+/', '', $command);
+        return Process::run($commandWithoutSudo);
     }
 }
