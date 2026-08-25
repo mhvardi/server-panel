@@ -54,7 +54,7 @@ class BackupTaskController extends Controller
             
             'include_files' => 'required|boolean',
             'include_db' => 'required|boolean',
-            'db_name' => 'nullable|string|required_if:include_db,true',
+            
             
             'local_enabled' => 'required|boolean',
             'local_retention_days' => 'required|integer|min:1',
@@ -158,7 +158,7 @@ class BackupTaskController extends Controller
     public function backupDatabaseNow(Service $service)
     {
         $settings = $this->getBackupSettings($service);
-        $dbName = $settings['db_name'] ?? null;
+        $dbName = $service->getDatabaseName();
         if (empty($dbName)) return back()->with('error', 'پایگاه‌داده تنظیم نشده است.');
 
         $backupDir = storage_path('app/backups/' . $service->id);

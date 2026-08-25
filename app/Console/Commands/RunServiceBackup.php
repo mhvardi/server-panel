@@ -104,8 +104,9 @@ class RunServiceBackup extends Command
                 }
 
                 // Backup database
-                if (!empty($settings['include_db']) && !empty($settings['db_name'])) {
-                    $this->addLog("🗄️ در حال بکاپ از پایگاه‌داده: " . $settings['db_name']);
+                $dbName = $service->getDatabaseName();
+                if (!empty($settings['include_db']) && !empty($dbName)) {
+                    $this->addLog("🗄️ در حال بکاپ از پایگاه‌داده: " . $dbName);
                     $dbDump = "{$backupDir}/db_{$timestamp}.sql";
                     $tempFiles[] = $dbDump;
 
@@ -119,7 +120,7 @@ class RunServiceBackup extends Command
                         if ($dbPass !== '' && $dbPass !== null) {
                             $dumpCmd[] = '-p' . $dbPass;
                         }
-                        $dumpCmd[] = $settings['db_name'];
+                        $dumpCmd[] = $dbName;
 
                         $process = new Process($dumpCmd);
                         $process->setTimeout(300);
