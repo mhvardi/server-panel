@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Service;
 use App\Services\CronJobService;
+use App\Services\FtpBackupDriver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\Process;
 use Carbon\Carbon;
 
 class BackupTaskController extends Controller
@@ -54,7 +56,6 @@ class BackupTaskController extends Controller
             
             'include_files' => 'required|boolean',
             'include_db' => 'required|boolean',
-            
             
             'local_enabled' => 'required|boolean',
             'local_retention_days' => 'required|integer|min:1',
@@ -111,7 +112,6 @@ class BackupTaskController extends Controller
             }
             
             $exitCode = Artisan::call('backup:run-service', $args);
-            $output = Artisan::output();
             
             if ($exitCode === 0) {
                 return back()->with('success', 'عملیات بکاپ با موفقیت انجام شد.');
@@ -123,6 +123,206 @@ class BackupTaskController extends Controller
         }
     }
 
+    /**
+     * Dedicated Manual Backup Handler
+     * Supports:
+     * - target: download | local | ftp
+     * - type: db | files | full
+     */
+    public function manualBackup(Request $request, Service $service)
+    {
+        $request->validate([
+            'target' => 'required|in:download,local,ftp',
+            'type' => 'required|in:db,files,full',
+        ]);
+
+        $target = $request->target;
+        $type = $request->type;
+        $settings = $this->getBackupSettings($service);
+        $servicePath = $this->getServicePath($service);
+        $backupDir = storage_path('app/backups/' . $service->id);
+        File::ensureDirectoryExists($backupDir);
+        $timestamp = now()->format('Y-m-d_H-i-s');
+
+        if ($target === 'ftp') {
+            if (empty($settings['remote_enabled']) || empty($settings['remote_host']) || empty($settings['remote_user'])) {
+                return back()->with('error', 'ذخیره‌سازی ریموت (FTP) فعال یا کامل تنظیم نشده است. ابتدا در تب تنظیمات، FTP را فعال و اطلاعات آن را ذخیره کنید.');
+            }
+        }
+
+        try {
+            $filePath = null;
+            $fileName = null;
+
+            if ($type === 'db') {
+                $dbName = $service->getDatabaseName();
+                if (empty($dbName)) {
+                    return back()->with('error', 'نام پایگاه‌داده در فایل .env سرویس یافت نشد.');
+                }
+                $fileName = 'db_' . $dbName . '_' . $timestamp . '.sql.gz';
+                $filePath = $backupDir . '/' . $fileName;
+                $this->createDbBackup($dbName, $filePath);
+            } elseif ($type === 'files') {
+                $fileName = 'files_' . $service->name . '_' . $timestamp . '.tar.gz';
+                $filePath = $backupDir . '/' . $fileName;
+                $this->createFilesBackup($servicePath, $filePath);
+            } elseif ($type === 'full') {
+                $fileName = 'backup_full_' . $service->name . '_' . $timestamp . '.tar.gz';
+                $filePath = $backupDir . '/' . $fileName;
+                $this->createFullBackup($service, $filePath);
+            }
+
+            if (!File::exists($filePath) || filesize($filePath) === 0) {
+                throw new \Exception('فایل بکاپ ایجاد نشد یا خالی است.');
+            }
+
+            $sizeMb = round(filesize($filePath) / 1024 / 1024, 2);
+
+            // Fix permissions if needed
+            if (!env('BACKUP_MOCK_ENABLED', false)) {
+                @exec("chown -R www-data:www-data " . escapeshellarg($backupDir) . " 2>/dev/null");
+            }
+
+            if ($target === 'download') {
+                return response()->download($filePath, $fileName)->deleteFileAfterSend(true);
+            }
+
+            if ($target === 'ftp') {
+                $ftp = new FtpBackupDriver(
+                    $settings['remote_host'],
+                    21,
+                    $settings['remote_user'],
+                    $settings['remote_password']
+                );
+                $ftp->connect();
+                $remoteDir = rtrim($settings['remote_path'] ?? '/public_html', '/') . '/' . ($service->domain ?: $service->name);
+                $ftp->ensureRemoteDir($remoteDir);
+                $ftp->upload($filePath, $remoteDir . '/' . $fileName);
+                $remoteDays = intval($settings['remote_retention_days'] ?? 7);
+                $ftp->cleanOldBackupsByDays($remoteDir, $remoteDays);
+                $ftp->disconnect();
+
+                // If local storage is not enabled, remove the local copy
+                if (empty($settings['local_enabled'])) {
+                    File::delete($filePath);
+                }
+
+                $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های پروژه', 'full' => 'کامل (دیتابیس + فایل‌ها)'];
+                return back()->with('success', "بکاپ دستی «{$typeLabels[$type]}» با موفقیت به سرور FTP ارسال شد ({$sizeMb} MB).");
+            }
+
+            if ($target === 'local') {
+                // Local retention cleanup
+                $localDays = intval($settings['local_retention_days'] ?? 7);
+                $cutoff = now()->subDays($localDays)->getTimestamp();
+                foreach (File::files($backupDir) as $f) {
+                    if (str_starts_with($f->getFilename(), 'backup_') || str_starts_with($f->getFilename(), 'db_') || str_starts_with($f->getFilename(), 'files_')) {
+                        if ($f->getMTime() < $cutoff) {
+                            File::delete($f->getPathname());
+                        }
+                    }
+                }
+
+                $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های پروژه', 'full' => 'کامل (دیتابیس + فایل‌ها)'];
+                return back()->with('success', "بکاپ دستی «{$typeLabels[$type]}» با موفقیت در سرور محلی ذخیره شد ({$sizeMb} MB).");
+            }
+
+        } catch (\Exception $e) {
+            return back()->with('error', 'خطا در عملیات بکاپ دستی: ' . $e->getMessage());
+        }
+    }
+
+    private function createDbBackup(string $dbName, string $destPath): void
+    {
+        $isMock = env('BACKUP_MOCK_ENABLED', false);
+        if ($isMock) {
+            $sql = "-- Mock DB Backup for {$dbName}\n-- Created: " . date('Y-m-d H:i:s') . "\nCREATE TABLE IF NOT EXISTS `sample` (`id` int(11));\n";
+            file_put_contents($destPath, gzencode($sql));
+            return;
+        }
+
+        $dbHost = config('database.connections.mysql.host', '127.0.0.1');
+        $dbPort = config('database.connections.mysql.port', '3306');
+        $dbUser = config('database.connections.mysql.username', 'root');
+        $dbPass = config('database.connections.mysql.password', '');
+        $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
+        $cmd = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($destPath);
+        
+        $process = \Illuminate\Support\Facades\Process::run($cmd);
+        if (!$process->successful()) {
+            throw new \Exception('خطا در اجرای mysqldump: ' . $process->errorOutput());
+        }
+    }
+
+    private function createFilesBackup(string $servicePath, string $destPath): void
+    {
+        if (!is_dir($servicePath)) {
+            throw new \Exception("پوشه سرویس یافت نشد: {$servicePath}");
+        }
+
+        $process = new Process([
+            'tar', '-czf', $destPath, '-C', $servicePath,
+            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
+        ]);
+        $process->setTimeout(300);
+        $process->mustRun();
+    }
+
+    private function createFullBackup(Service $service, string $destPath): void
+    {
+        $servicePath = $this->getServicePath($service);
+        $backupDir = storage_path('app/backups/' . $service->id);
+        $timestamp = now()->format('Y-m-d_H-i-s');
+        $tempFiles = [];
+
+        // 1. Files tar (excluding vendor and node_modules)
+        $filesTar = "{$backupDir}/temp_files_{$timestamp}.tar";
+        $tempFiles[] = $filesTar;
+        $process = new Process([
+            'tar', '-cf', $filesTar, '-C', $servicePath,
+            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
+        ]);
+        $process->setTimeout(300);
+        $process->mustRun();
+
+        // 2. DB dump
+        $dbName = $service->getDatabaseName();
+        if (!empty($dbName)) {
+            $dbDump = "{$backupDir}/temp_db_{$timestamp}.sql";
+            $tempFiles[] = $dbDump;
+            $isMock = env('BACKUP_MOCK_ENABLED', false);
+            if ($isMock) {
+                file_put_contents($dbDump, "-- Mock DB Backup for {$dbName}\n");
+            } else {
+                $dbHost = config('database.connections.mysql.host', '127.0.0.1');
+                $dbPort = config('database.connections.mysql.port', '3306');
+                $dbUser = config('database.connections.mysql.username', 'root');
+                $dbPass = config('database.connections.mysql.password', '');
+                $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
+                $cmd = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " > " . escapeshellarg($dbDump);
+                $p = \Illuminate\Support\Facades\Process::run($cmd);
+                if (!$p->successful()) {
+                    throw new \Exception('خطا در mysqldump: ' . $p->errorOutput());
+                }
+            }
+        }
+
+        // 3. Final tar.gz archive
+        try {
+            $tarCmd = ['tar', '-czf', $destPath, '-C', $backupDir];
+            foreach ($tempFiles as $tf) {
+                $tarCmd[] = basename($tf);
+            }
+            $p = new Process($tarCmd);
+            $p->setTimeout(300);
+            $p->mustRun();
+        } finally {
+            foreach ($tempFiles as $tf) {
+                if (File::exists($tf)) File::delete($tf);
+            }
+        }
+    }
+
     public function getLog(Service $service)
     {
         $settings = $this->getBackupSettings($service);
@@ -130,7 +330,6 @@ class BackupTaskController extends Controller
         
         if ($logFile && File::exists($logFile) && is_readable($logFile)) {
             $content = File::get($logFile);
-            // Get last run only by splitting
             $parts = explode("-------------------------", $content);
             $lastLog = trim($parts[count($parts) - 2] ?? $content);
             return response()->json(['log' => $lastLog]);
@@ -146,7 +345,7 @@ class BackupTaskController extends Controller
             'remote_password' => 'required|string',
         ]);
         
-        $result = \App\Services\FtpBackupDriver::testConnection(
+        $result = FtpBackupDriver::testConnection(
             $request->remote_host, 
             $request->remote_user, 
             $request->remote_password
@@ -154,41 +353,16 @@ class BackupTaskController extends Controller
         return response()->json($result);
     }
     
-    // ... dbNow & filesNow omitted for brevity, keeping old logic via exec
     public function backupDatabaseNow(Service $service)
     {
-        $settings = $this->getBackupSettings($service);
-        $dbName = $service->getDatabaseName();
-        if (empty($dbName)) return back()->with('error', 'پایگاه‌داده تنظیم نشده است.');
-
-        $backupDir = storage_path('app/backups/' . $service->id);
-        File::ensureDirectoryExists($backupDir);
-        $fileName = 'db_' . $dbName . '_' . date('Y-m-d_H-i-s') . '.sql.gz';
-        $filePath = $backupDir . '/' . $fileName;
-
-        $dbHost = config('database.connections.mysql.host', '127.0.0.1');
-        $dbPort = config('database.connections.mysql.port', '3306');
-        $dbUser = config('database.connections.mysql.username', 'root');
-        $dbPass = config('database.connections.mysql.password', '');
-        $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
-        $cmd = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
-        
-        $process = \Illuminate\Support\Facades\Process::run($cmd);
-        if ($process->successful()) return response()->download($filePath);
-        return back()->with('error', 'خطا: ' . $process->errorOutput());
+        $request = new Request(['target' => 'download', 'type' => 'db']);
+        return $this->manualBackup($request, $service);
     }
 
     public function backupFilesNow(Service $service)
     {
-        $backupDir = storage_path('app/backups/' . $service->id);
-        File::ensureDirectoryExists($backupDir);
-        $fileName = 'files_' . date('Y-m-d_H-i-s') . '.zip';
-        $filePath = $backupDir . '/' . $fileName;
-        $cmd = "cd " . escapeshellarg($service->path) . " && zip -r " . escapeshellarg($filePath) . " . -x '*.git*' '*node_modules*' '*.backup*'";
-        
-        $process = \Illuminate\Support\Facades\Process::run($cmd);
-        if ($process->successful()) return response()->download($filePath);
-        return back()->with('error', 'خطا: ' . $process->errorOutput());
+        $request = new Request(['target' => 'download', 'type' => 'files']);
+        return $this->manualBackup($request, $service);
     }
 
     public function downloadBackup(Service $service, $filename)
@@ -226,7 +400,7 @@ class BackupTaskController extends Controller
         
         $valid_files = [];
         foreach ($files as $file) {
-            if (str_starts_with($file->getFilename(), 'backup_')) {
+            if (preg_match('/^(backup|db|files)_/i', $file->getFilename())) {
                 try { if ($file->isReadable()) $valid_files[] = $file; } catch (\Exception $e) {}
             }
         }
@@ -236,7 +410,7 @@ class BackupTaskController extends Controller
         });
 
         $recent = [];
-        foreach (array_slice($valid_files, 0, 10) as $file) {
+        foreach (array_slice($valid_files, 0, 15) as $file) {
             try {
                 $recent[] = [
                     'name' => $file->getFilename(),
@@ -263,7 +437,6 @@ class BackupTaskController extends Controller
             'cron_expression' => '0 2 * * *',
             'include_files' => true,
             'include_db' => false,
-            'db_name' => '',
             'local_enabled' => true,
             'local_retention_days' => 7,
             'remote_enabled' => false,
@@ -292,5 +465,13 @@ class BackupTaskController extends Controller
             return rtrim(env('BACKUP_MOCK_SERVICE_BASE', storage_path('app/mock-services')), '/') . '/' . $service->domain . '/.backup/settings.json';
         }
         return $service->path . '/.backup/settings.json';
+    }
+
+    private function getServicePath(Service $service): string
+    {
+        if (env('BACKUP_MOCK_ENABLED', false)) {
+            return rtrim(env('BACKUP_MOCK_SERVICE_BASE', storage_path('app/mock-services')), '/') . '/' . $service->domain;
+        }
+        return $service->path;
     }
 }

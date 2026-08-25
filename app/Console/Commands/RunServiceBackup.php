@@ -95,7 +95,7 @@ class RunServiceBackup extends Command
                     if (!$isDryRun) {
                         $process = new Process([
                             'tar', '-cf', $filesArchive, '-C', $service->path, 
-                            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '.'
+                            '--exclude=.backup', '--exclude=.git', '--exclude=node_modules', '--exclude=vendor', '.'
                         ]);
                         $process->setTimeout(300);
                         $process->mustRun();
