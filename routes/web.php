@@ -15,6 +15,7 @@ use App\Http\Controllers\BackupTaskController;
 use App\Http\Controllers\CronJobController;
 use App\Http\Controllers\DomainMappingController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\FileManagerController;
 
 
 // Installation Routes
@@ -142,4 +143,19 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::post('/settings/update', [SettingsController::class, 'updatePanel'])->name('settings.update');
     Route::post('/settings/manual-update', [SettingsController::class, 'manualUpdatePanel'])->name('settings.manual-update');
+});
+
+// File Manager Routes
+Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('file-manager')->name('file-manager.')->group(function () {
+    Route::get('/',            [FileManagerController::class, 'index'])->name('index');
+    Route::get('/browse',      [FileManagerController::class, 'browse'])->name('browse');
+    Route::get('/read',        [FileManagerController::class, 'read'])->name('read');
+    Route::post('/save',       [FileManagerController::class, 'save'])->name('save');
+    Route::post('/delete',     [FileManagerController::class, 'delete'])->name('delete');
+    Route::post('/upload',     [FileManagerController::class, 'upload'])->name('upload');
+    Route::get('/download',    [FileManagerController::class, 'download'])->name('download');
+    Route::post('/mkdir',      [FileManagerController::class, 'mkdir'])->name('mkdir');
+    Route::post('/touch',      [FileManagerController::class, 'touch'])->name('touch');
+    Route::post('/rename',     [FileManagerController::class, 'rename'])->name('rename');
+    Route::get('/disk-usage',  [FileManagerController::class, 'diskUsage'])->name('disk-usage');
 });

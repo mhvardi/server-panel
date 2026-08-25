@@ -637,6 +637,8 @@ DB_PASSWORD={$cfg['password']}";
         <input type="hidden" name="pma_username" id="pma_user">
         <input type="hidden" name="pma_password" id="pma_pass">
         <input type="hidden" name="server" value="1">
+        <input type="hidden" name="target" id="pma_target">
+        <input type="hidden" name="route" id="pma_route">
         <input type="hidden" name="db" id="pma_db">
     </form>
 
@@ -680,21 +682,29 @@ DB_PASSWORD={$cfg['password']}";
                 },
 
                 openPma(url, username, b64Password, db) {
-                    if (b64Password) {
+                    if (b64Password && username) {
                         const password = atob(b64Password);
+                        
+                        // Auto copy password to clipboard as an instant fallback
+                        try {
+                            navigator.clipboard.writeText(password);
+                        } catch(e) {}
+
                         const form = document.getElementById('pmaLoginForm');
                         
                         let actionUrl = url.split('?')[0];
-                        if(!actionUrl.endsWith('/index.php') && !actionUrl.endsWith('/')) {
-                            actionUrl += '/index.php';
+                        if(!actionUrl.endsWith('/index.php')) {
+                            actionUrl = actionUrl.replace(/\/+$/, '') + '/index.php';
                         }
                         
                         form.action = actionUrl;
                         document.getElementById('pma_user').value = username;
                         document.getElementById('pma_pass').value = password;
                         document.getElementById('pma_db').value = db || '';
+                        document.getElementById('pma_target').value = db ? `index.php?route=/database/structure&db=${encodeURIComponent(db)}` : 'index.php';
+                        document.getElementById('pma_route').value = db ? '/database/structure' : '/';
                         
-                        this.showToast('در حال انتقال خودکار به phpMyAdmin...', 'success');
+                        this.showToast('ورود خودکار به phpMyAdmin با کاربر ' + username + ' (رمز عبور در کلیپ‌بورد نیز کپی شد)', 'success');
                         form.submit();
                     } else {
                         window.open(url, '_blank');
