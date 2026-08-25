@@ -6,7 +6,7 @@
 <div class="max-w-7xl mx-auto" x-data="{ activeTab: 'settings' }">
     <div class="flex items-center justify-between mb-6">
         <div>
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-200">پشتیبان‌گیری: {{ $service->name }}</h1>
+            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-200">پشتیبان‌گیری هوشمند: {{ $service->name }}</h1>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1" dir="ltr">{{ $service->domain }} ({{ env('BACKUP_MOCK_ENABLED') ? 'MOCK MODE' : $service->path }})</p>
         </div>
         <a href="{{ route('backup_tasks.index') }}" class="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-lg shadow-sm hover:bg-gray-300 dark:hover:bg-gray-600">
@@ -26,7 +26,7 @@
     <div class="border-b border-gray-200 dark:border-gray-700 mb-6">
         <nav class="-mb-px flex space-x-8 space-x-reverse" aria-label="Tabs">
             <button @click="activeTab = 'settings'" :class="activeTab === 'settings' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
-                ⚙️ تنظیمات خودکار
+                ⚙️ زمان‌بندی مستقل و نگهداری
             </button>
             <button @click="activeTab = 'manual'" :class="activeTab === 'manual' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
                 ⚡ عملیات بکاپ دستی
@@ -40,161 +40,233 @@
         </nav>
     </div>
 
-    <!-- 1. SETTINGS TAB -->
+    <!-- 1. SETTINGS TAB (INDEPENDENT DB & FILES SCHEDULING) -->
     <div x-show="activeTab === 'settings'">
         <form action="{{ route('backup_tasks.save_settings', $service->id) }}" method="POST" x-data="{ 
+            db_enabled: {{ old('db_enabled', $settings['db_enabled'] ?? true) ? 'true' : 'false' }},
+            files_enabled: {{ old('files_enabled', $settings['files_enabled'] ?? true) ? 'true' : 'false' }},
             local_enabled: {{ old('local_enabled', $settings['local_enabled'] ?? true) ? 'true' : 'false' }},
             remote_enabled: {{ old('remote_enabled', $settings['remote_enabled'] ?? false) ? 'true' : 'false' }}, 
-            include_db: {{ old('include_db', $settings['include_db'] ?? false) ? 'true' : 'false' }},
-            cron_preset: '{{ old('cron_preset', in_array($settings['cron_expression'] ?? '', ['0 0 * * *','0 2 * * *','0 2 * * 5']) ? $settings['cron_expression'] : 'custom') }}',
+            db_cron_preset: '{{ old('db_cron_preset', in_array($settings['db_cron_expression'] ?? '', ['0 2 * * *','0 0 * * *','0 */12 * * *']) ? $settings['db_cron_expression'] : 'custom') }}',
+            files_cron_preset: '{{ old('files_cron_preset', in_array($settings['files_cron_expression'] ?? '', ['0 2 * * 5','0 2 * * 0','0 3 1 * *']) ? $settings['files_cron_expression'] : 'custom') }}',
             fillCentralFtp() {
                 this.remote_enabled = true;
                 document.getElementById('remote_host').value = '80.249.115.114';
                 document.getElementById('remote_user').value = 'mhvardi@backup.vardicrm.ir';
                 document.getElementById('remote_password').value = 'pqDd2PZ1V8Pkq6r3';
                 document.getElementById('remote_path').value = '/public_html';
-                document.getElementById('remote_retention_days').value = '7';
             }
         }">
             @csrf
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md mb-6">
-                <div class="p-6 space-y-6">
-                    <fieldset class="space-y-4">
-                        <legend class="text-lg font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2 mb-4">تنظیمات پایه و زمان‌بندی خودکار</legend>
-                        <div class="flex items-center">
-                            <input type="hidden" name="enabled" value="0">
-                            <input id="enabled" name="enabled" type="checkbox" value="1" {{ old('enabled', $settings['enabled'] ?? false) ? 'checked' : '' }} class="h-4 w-4 rounded border-gray-300 text-indigo-600">
-                            <label for="enabled" class="mr-3 block text-sm font-medium text-gray-700 dark:text-gray-300">فعال کردن پشتیبان‌گیری خودکار و دوره‌ای (CronJob)</label>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-6 mb-6">
+                <!-- Section 1: DATABASE BACKUP SCHEDULE & RETENTION -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-r-4 border-blue-500 overflow-hidden">
+                    <div class="p-6 space-y-4">
+                        <div class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="p-2 bg-blue-100 text-blue-600 rounded-lg dark:bg-blue-900/50 dark:text-blue-400">
+                                    🗄️
+                                </span>
+                                <div>
+                                    <h3 class="text-base font-bold text-gray-800 dark:text-gray-200">پشتیبان‌گیری خودکار پایگاه‌داده (Database)</h3>
+                                    <p class="text-xs text-gray-500">پایگاه‌داده‌ها حجم کمی دارند و معمولاً به صورت روزانه بکاپ گرفته می‌شوند.</p>
+                                </div>
+                            </div>
                             <div>
-                                <label for="cron_preset" class="block text-sm font-medium text-gray-700 dark:text-gray-300">انتخاب زمان‌بندی</label>
-                                <select x-model="cron_preset" name="cron_preset" id="cron_preset" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm dark:bg-gray-700 dark:border-gray-600">
-                                    <option value="0 0 * * *">هر شب ساعت ۰۰:۰۰ بامداد</option>
-                                    <option value="0 2 * * *">هر شب ساعت ۰۲:۰۰ بامداد (پیشنهادی)</option>
-                                    <option value="0 2 * * 5">هر جمعه ساعت ۰۲:۰۰ بامداد</option>
-                                    <option value="custom">تنظیم دستی (Custom Cron)</option>
-                                </select>
-                            </div>
-                            <div x-show="cron_preset === 'custom'">
-                                <label for="cron_custom" class="block text-sm font-medium text-gray-700 dark:text-gray-300">عبارت Cron سفارشی</label>
-                                <input type="text" name="cron_custom" id="cron_custom" value="{{ old('cron_custom', $settings['cron_expression'] ?? '0 2 * * *') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm dark:bg-gray-700 dark:border-gray-600 text-left" dir="ltr">
+                                <input type="hidden" name="db_enabled" value="0">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="db_enabled" value="1" x-model="db_enabled" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                                    <span class="mr-3 text-xs font-semibold text-gray-700 dark:text-gray-300" x-text="db_enabled ? 'فعال' : 'غیرفعال'"></span>
+                                </label>
                             </div>
                         </div>
-                    </fieldset>
 
-                    <fieldset class="space-y-4">
-                        <legend class="text-lg font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2 mb-4">محتوای پشتیبان در اجرای خودکار</legend>
-                        <div class="flex items-center">
-                            <input type="hidden" name="include_files" value="0">
-                            <input id="include_files" name="include_files" type="checkbox" value="1" {{ old('include_files', $settings['include_files'] ?? true) ? 'checked' : '' }} class="h-4 w-4 rounded border-gray-300 text-indigo-600">
-                            <label for="include_files" class="mr-3 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                                پشتیبان‌گیری از فایل‌های پروژه <span class="text-xs text-gray-500 font-normal">(پوشه‌های vendor و node_modules به طور خودکار استثنا می‌شوند)</span>
-                            </label>
-                        </div>
-                        <div class="flex items-center">
-                            <input type="hidden" name="include_db" value="0">
-                            <input id="include_db" name="include_db" type="checkbox" value="1" x-model="include_db" class="h-4 w-4 rounded border-gray-300 text-indigo-600">
-                            <label for="include_db" class="mr-3 block text-sm font-medium text-gray-700 dark:text-gray-300">پشتیبان‌گیری از پایگاه‌داده</label>
-                        </div>
-                        <div x-show="include_db">
-                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">نام پایگاه‌داده (شناسایی خودکار از .env)</label>
-                            <div class="mt-1 flex items-center">
-                                <input type="text" disabled value="{{ $service->getDatabaseName() ?? 'یافت نشد' }}" class="block w-full md:w-1/2 rounded-md border-gray-300 shadow-sm bg-gray-100 dark:bg-gray-600 dark:border-gray-500 text-gray-500 text-left font-mono" dir="ltr">
-                                @if(!$service->getDatabaseName())
-                                    <span class="mr-3 text-xs text-red-500 font-bold">⚠️ در فایل env یافت نشد!</span>
-                                @else
-                                    <span class="mr-3 text-xs text-green-500 font-bold">✅ متصل به .env سرویس</span>
-                                @endif
-                            </div>
-                        </div>
-                    </fieldset>
-
-                    <fieldset class="space-y-4">
-                        <legend class="text-lg font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2 mb-4">محل‌های ذخیره‌سازی و سیاست نگهداری (Retention)</legend>
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                            <!-- Local Storage -->
-                            <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
-                                <div class="flex items-center mb-4">
-                                    <input type="hidden" name="local_enabled" value="0">
-                                    <input id="local_enabled" name="local_enabled" type="checkbox" value="1" x-model="local_enabled" class="h-4 w-4 rounded border-gray-300 text-indigo-600">
-                                    <label for="local_enabled" class="mr-3 block text-sm font-bold text-gray-800 dark:text-gray-200">ذخیره بکاپ در سرور محلی (Local)</label>
+                        <div x-show="db_enabled" class="space-y-4 pt-2">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">نام پایگاه‌داده شناسایی‌شده:</label>
+                                <div class="mt-1 flex items-center">
+                                    <input type="text" disabled value="{{ $service->getDatabaseName() ?? 'یافت نشد' }}" class="block w-full md:w-1/3 rounded-md border-gray-300 shadow-sm bg-gray-100 dark:bg-gray-600 dark:border-gray-500 text-gray-600 text-left font-mono text-xs" dir="ltr">
+                                    @if(!$service->getDatabaseName())
+                                        <span class="mr-3 text-xs text-red-500 font-bold">⚠️ در فایل env یافت نشد!</span>
+                                    @else
+                                        <span class="mr-3 text-xs text-green-600 font-bold">✅ متصل به .env</span>
+                                    @endif
                                 </div>
-                                <div x-show="local_enabled">
-                                    <label for="local_retention_days" class="block text-sm font-medium text-gray-700 dark:text-gray-300">مدت نگهداری در سرور محلی</label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label for="db_cron_preset" class="block text-xs font-medium text-gray-700 dark:text-gray-300">زمان‌بندی دیتابیس (Cron)</label>
+                                    <select x-model="db_cron_preset" name="db_cron_preset" id="db_cron_preset" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600">
+                                        <option value="0 2 * * *">هر شب ساعت ۰۲:۰۰ بامداد (پیشنهادی)</option>
+                                        <option value="0 0 * * *">هر شب ساعت ۰۰:۰۰ بامداد</option>
+                                        <option value="0 */12 * * *">هر ۱۲ ساعت یک‌بار</option>
+                                        <option value="custom">تنظیم دستی (Custom Cron)</option>
+                                    </select>
+                                </div>
+                                <div x-show="db_cron_preset === 'custom'">
+                                    <label for="db_cron_custom" class="block text-xs font-medium text-gray-700 dark:text-gray-300">عبارت Cron سفارشی دیتابیس</label>
+                                    <input type="text" name="db_cron_custom" id="db_cron_custom" value="{{ old('db_cron_custom', $settings['db_cron_expression'] ?? '0 2 * * *') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
+                                </div>
+                                <div>
+                                    <label for="db_local_retention_days" class="block text-xs font-medium text-gray-700 dark:text-gray-300">نگهداری دیتابیس در Local</label>
                                     <div class="flex items-center mt-1">
-                                        <input type="number" name="local_retention_days" id="local_retention_days" value="{{ old('local_retention_days', $settings['local_retention_days'] ?? 7) }}" min="1" class="block w-24 rounded-r-md border-gray-300 shadow-sm dark:bg-gray-700 dark:border-gray-600 text-center">
-                                        <span class="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-500 sm:text-sm dark:bg-gray-600 dark:border-gray-500 dark:text-gray-300">روز</span>
+                                        <input type="number" name="db_local_retention_days" id="db_local_retention_days" value="{{ old('db_local_retention_days', $settings['db_local_retention_days'] ?? 3) }}" min="1" class="block w-20 rounded-r-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-center">
+                                        <span class="inline-flex items-center px-2 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-xs dark:bg-gray-600 dark:text-gray-300">روز</span>
                                     </div>
-                                    <p class="text-xs text-gray-500 mt-2">بکاپ‌های محلی قدیمی‌تر از این تعداد روز به صورت خودکار حذف می‌شوند.</p>
+                                    <p class="text-[10px] text-gray-500 mt-1">فایل‌های sql قدیمی‌تر از این روز پاک می‌شوند.</p>
+                                </div>
+                                <div>
+                                    <label for="db_remote_retention_days" class="block text-xs font-medium text-gray-700 dark:text-gray-300">نگهداری دیتابیس در FTP</label>
+                                    <div class="flex items-center mt-1">
+                                        <input type="number" name="db_remote_retention_days" id="db_remote_retention_days" value="{{ old('db_remote_retention_days', $settings['db_remote_retention_days'] ?? 3) }}" min="1" class="block w-20 rounded-r-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-center">
+                                        <span class="inline-flex items-center px-2 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-xs dark:bg-gray-600 dark:text-gray-300">روز</span>
+                                    </div>
+                                    <p class="text-[10px] text-gray-500 mt-1">در هاست FTP فقط فایل‌های N روز اخیر می‌مانند.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: FILES BACKUP SCHEDULE & RETENTION -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-r-4 border-emerald-500 overflow-hidden">
+                    <div class="p-6 space-y-4">
+                        <div class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="p-2 bg-emerald-100 text-emerald-600 rounded-lg dark:bg-emerald-900/50 dark:text-emerald-400">
+                                    📁
+                                </span>
+                                <div>
+                                    <h3 class="text-base font-bold text-gray-800 dark:text-gray-200">پشتیبان‌گیری خودکار فایل‌های سورس پروژه (Files)</h3>
+                                    <p class="text-xs text-gray-500">فایل‌های سورس به علت حجم بیشتر معمولاً به صورت هفتگی بکاپ‌گیری می‌شوند (بدون vendor و node_modules).</p>
+                                </div>
+                            </div>
+                            <div>
+                                <input type="hidden" name="files_enabled" value="0">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" name="files_enabled" value="1" x-model="files_enabled" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-600"></div>
+                                    <span class="mr-3 text-xs font-semibold text-gray-700 dark:text-gray-300" x-text="files_enabled ? 'فعال' : 'غیرفعال'"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div x-show="files_enabled" class="space-y-4 pt-2">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label for="files_cron_preset" class="block text-xs font-medium text-gray-700 dark:text-gray-300">زمان‌بندی فایل‌ها (Cron)</label>
+                                    <select x-model="files_cron_preset" name="files_cron_preset" id="files_cron_preset" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600">
+                                        <option value="0 2 * * 5">هر جمعه ساعت ۰۲:۰۰ بامداد (هفتگی پیشنهادی)</option>
+                                        <option value="0 2 * * 0">هر یکشنبه ساعت ۰۲:۰۰ بامداد</option>
+                                        <option value="0 3 1 * *">اول هر ماه ساعت ۰۳:۰۰ بامداد (ماهانه)</option>
+                                        <option value="custom">تنظیم دستی (Custom Cron)</option>
+                                    </select>
+                                </div>
+                                <div x-show="files_cron_preset === 'custom'">
+                                    <label for="files_cron_custom" class="block text-xs font-medium text-gray-700 dark:text-gray-300">عبارت Cron سفارشی فایل‌ها</label>
+                                    <input type="text" name="files_cron_custom" id="files_cron_custom" value="{{ old('files_cron_custom', $settings['files_cron_expression'] ?? '0 2 * * 5') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
+                                </div>
+                                <div>
+                                    <label for="files_local_retention_days" class="block text-xs font-medium text-gray-700 dark:text-gray-300">نگهداری فایل‌ها در Local</label>
+                                    <div class="flex items-center mt-1">
+                                        <input type="number" name="files_local_retention_days" id="files_local_retention_days" value="{{ old('files_local_retention_days', $settings['files_local_retention_days'] ?? 14) }}" min="1" class="block w-20 rounded-r-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-center">
+                                        <span class="inline-flex items-center px-2 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-xs dark:bg-gray-600 dark:text-gray-300">روز</span>
+                                    </div>
+                                    <p class="text-[10px] text-gray-500 mt-1">آرشیوهای قدیمی‌تر از این روز پاک می‌شوند.</p>
+                                </div>
+                                <div>
+                                    <label for="files_remote_retention_days" class="block text-xs font-medium text-gray-700 dark:text-gray-300">نگهداری فایل‌ها در FTP</label>
+                                    <div class="flex items-center mt-1">
+                                        <input type="number" name="files_remote_retention_days" id="files_remote_retention_days" value="{{ old('files_remote_retention_days', $settings['files_remote_retention_days'] ?? 14) }}" min="1" class="block w-20 rounded-r-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-center">
+                                        <span class="inline-flex items-center px-2 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-500 text-xs dark:bg-gray-600 dark:text-gray-300">روز</span>
+                                    </div>
+                                    <p class="text-[10px] text-gray-500 mt-1">آرشیوهای قدیمی‌تر در هاست FTP پاک می‌شوند.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 3: STORAGE DESTINATIONS (LOCAL & FTP CONFIG) -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-r-4 border-indigo-500 overflow-hidden">
+                    <div class="p-6 space-y-4">
+                        <h3 class="text-base font-bold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-3">محل‌های ذخیره‌سازی بکاپ‌ها</h3>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- Local Storage Toggle -->
+                            <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600 flex items-center justify-between">
+                                <div>
+                                    <label for="local_enabled" class="block text-sm font-bold text-gray-800 dark:text-gray-200">ذخیره بکاپ در سرور محلی (Local)</label>
+                                    <p class="text-xs text-gray-500 mt-1">در مسیر <code>storage/app/backups/{{ $service->id }}</code> ذخیره می‌شود.</p>
+                                </div>
+                                <div>
+                                    <input type="hidden" name="local_enabled" value="0">
+                                    <input id="local_enabled" name="local_enabled" type="checkbox" value="1" x-model="local_enabled" class="h-5 w-5 rounded border-gray-300 text-indigo-600">
                                 </div>
                             </div>
 
-                            <!-- FTP Storage -->
+                            <!-- FTP Storage Toggle -->
                             <div class="bg-indigo-50 dark:bg-indigo-900/10 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                                <div class="flex items-center justify-between mb-4">
-                                    <div class="flex items-center">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div>
+                                        <label for="remote_enabled" class="block text-sm font-bold text-gray-800 dark:text-gray-200">آپلود در سرور ریموت (FTP)</label>
+                                        <p class="text-xs text-gray-500 mt-0.5">در پوشه مجزای <code>/public_html/{{ $service->domain ?: $service->name }}</code></p>
+                                    </div>
+                                    <div class="flex items-center gap-2">
                                         <input type="hidden" name="remote_enabled" value="0">
-                                        <input id="remote_enabled" name="remote_enabled" type="checkbox" value="1" x-model="remote_enabled" class="h-4 w-4 rounded border-indigo-400 text-indigo-600">
-                                        <label for="remote_enabled" class="mr-3 block text-sm font-bold text-gray-800 dark:text-gray-200">آپلود در سرور ریموت (FTP)</label>
+                                        <input id="remote_enabled" name="remote_enabled" type="checkbox" value="1" x-model="remote_enabled" class="h-5 w-5 rounded border-indigo-400 text-indigo-600">
                                     </div>
-                                    <button type="button" @click="fillCentralFtp()" class="text-xs px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded shadow-sm">تکمیل خودکار اطلاعات سرور مرکزی</button>
                                 </div>
-                                
-                                <div x-show="remote_enabled" class="space-y-4">
-                                    <div class="grid grid-cols-2 gap-4">
+
+                                <div x-show="remote_enabled" class="space-y-3 pt-2 border-t border-indigo-200 dark:border-indigo-800">
+                                    <div class="text-left">
+                                        <button type="button" @click="fillCentralFtp()" class="text-xs px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded shadow-sm">تکمیل خودکار اطلاعات سرور مرکزی</button>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-3">
                                         <div>
-                                            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">هاست FTP</label>
-                                            <input type="text" name="remote_host" id="remote_host" value="{{ old('remote_host', $settings['remote_host'] ?? '') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
+                                            <label class="block text-[11px] font-medium text-gray-700 dark:text-gray-300">هاست FTP</label>
+                                            <input type="text" name="remote_host" id="remote_host" value="{{ old('remote_host', $settings['remote_host'] ?? '') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
                                         </div>
                                         <div>
-                                            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">مسیر ریموت پایه</label>
-                                            <input type="text" name="remote_path" id="remote_path" value="{{ old('remote_path', $settings['remote_path'] ?? '/public_html') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
+                                            <label class="block text-[11px] font-medium text-gray-700 dark:text-gray-300">مسیر پایه</label>
+                                            <input type="text" name="remote_path" id="remote_path" value="{{ old('remote_path', $settings['remote_path'] ?? '/public_html') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
                                         </div>
                                         <div>
-                                            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">نام کاربری FTP</label>
-                                            <input type="text" name="remote_user" id="remote_user" value="{{ old('remote_user', $settings['remote_user'] ?? '') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
+                                            <label class="block text-[11px] font-medium text-gray-700 dark:text-gray-300">نام کاربری FTP</label>
+                                            <input type="text" name="remote_user" id="remote_user" value="{{ old('remote_user', $settings['remote_user'] ?? '') }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
                                         </div>
                                         <div>
-                                            <label class="block text-xs font-medium text-gray-700 dark:text-gray-300">رمز عبور FTP (خالی = بدون تغییر)</label>
-                                            <input type="password" name="remote_password" id="remote_password" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
+                                            <label class="block text-[11px] font-medium text-gray-700 dark:text-gray-300">رمز عبور FTP (خالی = بدون تغییر)</label>
+                                            <input type="password" name="remote_password" id="remote_password" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-xs dark:bg-gray-700 dark:border-gray-600 text-left font-mono" dir="ltr">
                                         </div>
                                     </div>
-                                    <hr class="border-indigo-200 dark:border-indigo-800">
-                                    <div class="flex items-center justify-between">
-                                        <div>
-                                            <label for="remote_retention_days" class="block text-xs font-medium text-gray-700 dark:text-gray-300">مدت نگهداری در FTP</label>
-                                            <div class="flex items-center mt-1">
-                                                <input type="number" name="remote_retention_days" id="remote_retention_days" value="{{ old('remote_retention_days', $settings['remote_retention_days'] ?? 7) }}" min="1" class="block w-20 rounded-r-md border-gray-300 shadow-sm text-sm dark:bg-gray-700 dark:border-gray-600 text-center">
-                                                <span class="inline-flex items-center px-2 rounded-l-md border border-r-0 border-gray-300 bg-gray-100 text-gray-500 sm:text-xs dark:bg-gray-600 dark:border-gray-500 dark:text-gray-300">روز</span>
-                                            </div>
-                                        </div>
-                                        <div class="text-left mt-4">
-                                            <button type="button" onclick="testFtpConnection()" class="px-3 py-1.5 border border-indigo-600 text-xs font-medium rounded text-indigo-600 hover:bg-indigo-100 dark:border-indigo-400 dark:text-indigo-400 transition">تست اتصال FTP</button>
-                                            <div id="ftp-test-result" class="text-xs mt-1 block h-4"></div>
-                                        </div>
+                                    <div class="text-left pt-1 flex items-center justify-between">
+                                        <div id="ftp-test-result" class="text-xs h-4"></div>
+                                        <button type="button" onclick="testFtpConnection()" class="px-3 py-1.5 border border-indigo-600 text-xs font-medium rounded text-indigo-600 hover:bg-indigo-100 dark:border-indigo-400 dark:text-indigo-400 transition">تست اتصال FTP</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </fieldset>
-                </div>
-                <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-4 rounded-b-lg border-t border-gray-200 dark:border-gray-700 text-left">
-                    <button type="submit" class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium shadow-sm transition">ذخیره پیکربندی</button>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-700/50 px-6 py-4 rounded-b-lg border-t border-gray-200 dark:border-gray-700 text-left">
+                        <button type="submit" class="px-6 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-bold shadow-sm transition">ذخیره تمام تنظیمات هوشمند</button>
+                    </div>
                 </div>
             </div>
         </form>
     </div>
 
-    <!-- 2. MANUAL BACKUP TAB (DEDICATED SECTION) -->
+    <!-- 2. MANUAL BACKUP TAB -->
     <div x-show="activeTab === 'manual'" style="display: none;">
         <div class="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-sm text-blue-800 dark:text-blue-300 flex items-center gap-2">
             <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            <span>در تمام بخش‌های زیر، پوشه‌های حجیم <code>vendor</code> و <code>node_modules</code> و فایل‌های Git برای سبک‌سازی و افزایش سرعت، به طور خودکار از بکاپ استثنا می‌شوند.</span>
+            <span>پوشه‌های حجیم <code>vendor</code> و <code>node_modules</code> و فایل‌های Git برای سبک‌سازی و افزایش سرعت، به طور خودکار از تمام بکاپ‌های زیر استثنا می‌شوند.</span>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            <!-- Action 1: DIRECT DOWNLOAD -->
+            <!-- 1: DIRECT DOWNLOAD -->
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-t-4 border-emerald-500 flex flex-col justify-between">
                 <div class="p-5">
                     <div class="flex items-center gap-2 mb-3">
@@ -203,7 +275,7 @@
                         </span>
                         <h3 class="font-bold text-gray-800 dark:text-gray-200 text-base">۱. دانلود مستقیم به سیستم</h3>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">بکاپ گرفته شده مستقیماً روی مرورگر شما دانلود می‌شود.</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">بکاپ ایجاد شده مستقیماً روی سیستم شما دانلود خواهد شد.</p>
 
                     <div class="space-y-3">
                         <!-- Download DB -->
@@ -242,7 +314,7 @@
                 </div>
             </div>
 
-            <!-- Action 2: SAVE TO LOCAL -->
+            <!-- 2: SAVE TO LOCAL -->
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-t-4 border-blue-500 flex flex-col justify-between">
                 <div class="p-5">
                     <div class="flex items-center gap-2 mb-3">
@@ -251,7 +323,7 @@
                         </span>
                         <h3 class="font-bold text-gray-800 dark:text-gray-200 text-base">۲. ذخیره در سرور محلی (Local)</h3>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">بکاپ در پوشه ذخیره‌سازی سرور قرار می‌گیرد و در تاریخچه اضافه می‌شود.</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">فایل در پوشه نگهداری سرور ذخیره می‌شود و طبق روزهای تنظیم‌شده پاک خواهد شد.</p>
 
                     <div class="space-y-3">
                         <!-- Local DB -->
@@ -290,7 +362,7 @@
                 </div>
             </div>
 
-            <!-- Action 3: UPLOAD TO FTP -->
+            <!-- 3: UPLOAD TO FTP -->
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-t-4 border-indigo-500 flex flex-col justify-between">
                 <div class="p-5">
                     <div class="flex items-center justify-between mb-3">
@@ -308,7 +380,7 @@
                     </div>
                     
                     @if(!empty($settings['remote_enabled']))
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">فایل مستقیماً فشرده و به هاست FTP مرکزی ارسال می‌شود.</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">فایل بلافاصله آماده و به هاست FTP مرکزی ارسال می‌گردد.</p>
 
                         <div class="space-y-3">
                             <!-- FTP DB -->
@@ -376,7 +448,7 @@
                     </div>
                     
                     <div class="flex justify-between items-center mb-3">
-                        <span class="text-sm text-gray-500">حجم بکاپ:</span>
+                        <span class="text-sm text-gray-500">حجم آخرین خروجی:</span>
                         <span class="text-sm font-mono text-indigo-600 font-bold">{{ $last_backup_status['size'] }} MB</span>
                     </div>
                     
@@ -391,20 +463,31 @@
                     
                     <hr class="border-gray-200 dark:border-gray-700 my-4">
                     
-                    <form action="{{ route('backup_tasks.run', $service->id) }}" method="POST" class="mb-2">
-                        @csrf
-                        <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700">
-                            ▶️ اجرای خط لوله کامل (Full Pipeline)
-                        </button>
-                    </form>
-                    
-                    <form action="{{ route('backup_tasks.run', $service->id) }}" method="POST">
-                        @csrf
-                        <input type="hidden" name="ftp_only" value="1">
-                        <button type="submit" class="w-full flex justify-center py-2 px-4 border border-indigo-200 rounded-md shadow-sm text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-800">
-                            ☁️ ارسال مجدد آخرین بکاپ به FTP
-                        </button>
-                    </form>
+                    <div class="space-y-2">
+                        <form action="{{ route('backup_tasks.run', $service->id) }}" method="POST">
+                            @csrf
+                            <input type="hidden" name="type" value="db">
+                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-blue-600 rounded-md shadow-sm text-xs font-bold text-blue-600 hover:bg-blue-50 dark:border-blue-400 dark:text-blue-400 dark:hover:bg-blue-900/20">
+                                🗄️ اجرای بکاپ دیتابیس (بر اساس تنظیمات)
+                            </button>
+                        </form>
+                        
+                        <form action="{{ route('backup_tasks.run', $service->id) }}" method="POST">
+                            @csrf
+                            <input type="hidden" name="type" value="files">
+                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-emerald-600 rounded-md shadow-sm text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:border-emerald-400 dark:text-emerald-400 dark:hover:bg-emerald-900/20">
+                                📁 اجرای بکاپ فایل‌ها (بر اساس تنظیمات)
+                            </button>
+                        </form>
+
+                        <form action="{{ route('backup_tasks.run', $service->id) }}" method="POST">
+                            @csrf
+                            <input type="hidden" name="type" value="all">
+                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent rounded-md shadow-sm text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700">
+                                ▶️ اجرای کامل هر دو (DB + Files)
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
             
@@ -419,9 +502,17 @@
                         <ul class="divide-y divide-gray-200 dark:divide-gray-700">
                             @forelse($recent_backups as $backup)
                                 <li class="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex justify-between items-center">
-                                    <div>
-                                        <p class="font-mono text-sm font-semibold text-gray-800 dark:text-gray-200 truncate" dir="ltr">{{ $backup['name'] }}</p>
-                                        <p class="text-xs text-gray-500 mt-1">{{ $backup['date'] }} | حجم: <span class="font-bold text-indigo-600 dark:text-indigo-400">{{ $backup['size'] }}</span></p>
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-lg">
+                                            @if(str_starts_with($backup['name'], 'db_')) 🗄️
+                                            @elseif(str_starts_with($backup['name'], 'files_')) 📁
+                                            @else 📦
+                                            @endif
+                                        </span>
+                                        <div>
+                                            <p class="font-mono text-sm font-semibold text-gray-800 dark:text-gray-200 truncate" dir="ltr">{{ $backup['name'] }}</p>
+                                            <p class="text-xs text-gray-500 mt-1">{{ $backup['date'] }} | حجم: <span class="font-bold text-indigo-600 dark:text-indigo-400">{{ $backup['size'] }}</span></p>
+                                        </div>
                                     </div>
                                     <a href="{{ route('backup_tasks.download', [$service->id, $backup['name']]) }}" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-600 dark:hover:bg-gray-500 dark:text-white rounded text-xs font-medium">دانلود مستقیم</a>
                                 </li>
@@ -458,12 +549,12 @@ function testFtpConnection() {
     
     if(!host || !user) {
         resultSpan.textContent = 'نام کاربری و هاست الزامی است.';
-        resultSpan.className = 'text-xs mt-1 block h-4 text-red-500';
+        resultSpan.className = 'text-xs h-4 text-red-500';
         return;
     }
     
     resultSpan.textContent = 'در حال تست اتصال FTP...';
-    resultSpan.className = 'text-xs mt-1 block h-4 text-indigo-500 animate-pulse';
+    resultSpan.className = 'text-xs h-4 text-indigo-500 animate-pulse';
     
     fetch('{{ route('backup_tasks.test_ftp') }}', {
         method: 'POST',
@@ -471,10 +562,10 @@ function testFtpConnection() {
         body: JSON.stringify({ remote_host: host, remote_user: user, remote_password: pass })
     }).then(res => res.json()).then(data => {
         resultSpan.textContent = data.message;
-        resultSpan.className = 'text-xs mt-1 block h-4 font-bold ' + (data.success ? 'text-green-500' : 'text-red-500');
+        resultSpan.className = 'text-xs h-4 font-bold ' + (data.success ? 'text-green-500' : 'text-red-500');
     }).catch(e => {
         resultSpan.textContent = 'خطای شبکه در تست اتصال';
-        resultSpan.className = 'text-xs mt-1 block h-4 text-red-500';
+        resultSpan.className = 'text-xs h-4 text-red-500';
     });
 }
 

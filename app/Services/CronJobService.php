@@ -22,14 +22,21 @@ class CronJobService
 
     public function __construct()
     {
-        // Security: keep cron file in /etc/cron.d. Don't allow arbitrary paths.
         $configured = env('CRON_PANEL_FILE', '/etc/cron.d/server-panel');
         $configured = is_string($configured) ? trim($configured) : '';
-        if ($configured === '' || !str_starts_with($configured, '/etc/cron.d/')) {
-            $configured = '/etc/cron.d/server-panel';
-        }
-        if (str_contains($configured, '..')) {
-            $configured = '/etc/cron.d/server-panel';
+        if (env('BACKUP_MOCK_ENABLED', false) || str_starts_with($configured, storage_path())) {
+            // Local dev / testing mode
+            if ($configured === '' || !str_starts_with($configured, storage_path())) {
+                $configured = storage_path('app/cron/server-panel');
+            }
+            \Illuminate\Support\Facades\File::ensureDirectoryExists(dirname($configured));
+        } else {
+            if ($configured === '' || !str_starts_with($configured, '/etc/cron.d/')) {
+                $configured = '/etc/cron.d/server-panel';
+            }
+            if (str_contains($configured, '..')) {
+                $configured = '/etc/cron.d/server-panel';
+            }
         }
         $this->cronFile = $configured;
         $this->runAs = env('CRON_RUN_AS', 'www-data');
@@ -268,6 +275,15 @@ class CronJobService
         $id = strtolower(trim($id));
         foreach ($this->listJobs() as $job) {
             if ($job['id'] === $id) return $job;
+        }
+        return null;
+    }
+
+    public function findJobByName(string $name): ?array
+    {
+        $name = trim($name);
+        foreach ($this->listJobs() as $job) {
+            if ($job['name'] === $name) return $job;
         }
         return null;
     }

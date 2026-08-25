@@ -20,7 +20,9 @@ class BackupTaskController extends Controller
     {
         $services = Service::all()->map(function ($service) {
             $settings = $this->getBackupSettings($service);
-            $service->backup_enabled = $settings['enabled'] ?? false;
+            $service->db_enabled = $settings['db_enabled'] ?? false;
+            $service->files_enabled = $settings['files_enabled'] ?? false;
+            $service->backup_enabled = $service->db_enabled || $service->files_enabled;
             $service->last_backup = !empty($settings['last_backup']) ? Carbon::parse($settings['last_backup']) : null;
             $service->local_enabled = $settings['local_enabled'] ?? true;
             $service->remote_enabled = $settings['remote_enabled'] ?? false;
@@ -50,31 +52,44 @@ class BackupTaskController extends Controller
     public function saveSettings(Request $request, Service $service)
     {
         $data = $request->validate([
-            'enabled' => 'required|boolean',
-            'cron_preset' => 'required|string',
-            'cron_custom' => 'nullable|string',
-            
-            'include_files' => 'required|boolean',
-            'include_db' => 'required|boolean',
-            
+            // Database Backup Settings
+            'db_enabled' => 'required|boolean',
+            'db_cron_preset' => 'required|string',
+            'db_cron_custom' => 'nullable|string',
+            'db_local_retention_days' => 'required|integer|min:1',
+            'db_remote_retention_days' => 'required|integer|min:1',
+
+            // Files Backup Settings
+            'files_enabled' => 'required|boolean',
+            'files_cron_preset' => 'required|string',
+            'files_cron_custom' => 'nullable|string',
+            'files_local_retention_days' => 'required|integer|min:1',
+            'files_remote_retention_days' => 'required|integer|min:1',
+
+            // Storage Destinations
             'local_enabled' => 'required|boolean',
-            'local_retention_days' => 'required|integer|min:1',
-            
             'remote_enabled' => 'required|boolean',
             'remote_host' => 'nullable|string|required_if:remote_enabled,true',
             'remote_user' => 'nullable|string|required_if:remote_enabled,true',
             'remote_password' => 'nullable|string',
             'remote_path' => 'nullable|string|required_if:remote_enabled,true',
-            'remote_retention_days' => 'required|integer|min:1',
         ]);
 
-        if ($data['cron_preset'] === 'custom') {
-            $data['cron_expression'] = $data['cron_custom'];
+        // Process DB Cron
+        if ($data['db_cron_preset'] === 'custom') {
+            $data['db_cron_expression'] = $data['db_cron_custom'];
         } else {
-            $data['cron_expression'] = $data['cron_preset'];
+            $data['db_cron_expression'] = $data['db_cron_preset'];
         }
-        
-        unset($data['cron_preset'], $data['cron_custom']);
+        unset($data['db_cron_preset'], $data['db_cron_custom']);
+
+        // Process Files Cron
+        if ($data['files_cron_preset'] === 'custom') {
+            $data['files_cron_expression'] = $data['files_cron_custom'];
+        } else {
+            $data['files_cron_expression'] = $data['files_cron_preset'];
+        }
+        unset($data['files_cron_preset'], $data['files_cron_custom']);
 
         $existingSettings = $this->getBackupSettings($service);
 
@@ -95,15 +110,18 @@ class BackupTaskController extends Controller
             return back()->with('error', 'خطا در ذخیره تنظیمات: عدم دسترسی (Permission Denied).');
         }
 
-        $this->updateCronJob($service, $data);
+        $this->updateCronJobs($service, $data);
 
-        return redirect()->route('backup_tasks.settings', $service->id)->with('success', 'تنظیمات پشتیبان‌گیری با موفقیت ذخیره شد.');
+        return redirect()->route('backup_tasks.settings', $service->id)->with('success', 'تنظیمات پشتیبان‌گیری هوشمند با موفقیت ذخیره شد.');
     }
 
     public function run(Service $service, Request $request)
     {
         try {
             $args = ['service_id' => $service->id];
+            if ($request->has('type')) {
+                $args['--type'] = $request->type;
+            }
             if ($request->has('ftp_only')) {
                 $args['--ftp-only'] = true;
             }
@@ -123,12 +141,6 @@ class BackupTaskController extends Controller
         }
     }
 
-    /**
-     * Dedicated Manual Backup Handler
-     * Supports:
-     * - target: download | local | ftp
-     * - type: db | files | full
-     */
     public function manualBackup(Request $request, Service $service)
     {
         $request->validate([
@@ -178,7 +190,6 @@ class BackupTaskController extends Controller
 
             $sizeMb = round(filesize($filePath) / 1024 / 1024, 2);
 
-            // Fix permissions if needed
             if (!env('BACKUP_MOCK_ENABLED', false)) {
                 @exec("chown -R www-data:www-data " . escapeshellarg($backupDir) . " 2>/dev/null");
             }
@@ -198,11 +209,21 @@ class BackupTaskController extends Controller
                 $remoteDir = rtrim($settings['remote_path'] ?? '/public_html', '/') . '/' . ($service->domain ?: $service->name);
                 $ftp->ensureRemoteDir($remoteDir);
                 $ftp->upload($filePath, $remoteDir . '/' . $fileName);
-                $remoteDays = intval($settings['remote_retention_days'] ?? 7);
-                $ftp->cleanOldBackupsByDays($remoteDir, $remoteDays);
+
+                // Targeted prefix retention
+                if ($type === 'db') {
+                    $retentionDays = intval($settings['db_remote_retention_days'] ?? 3);
+                    $ftp->cleanOldBackupsByDays($remoteDir, $retentionDays, 'db_');
+                } elseif ($type === 'files') {
+                    $retentionDays = intval($settings['files_remote_retention_days'] ?? 14);
+                    $ftp->cleanOldBackupsByDays($remoteDir, $retentionDays, 'files_');
+                } else {
+                    $retentionDays = intval($settings['files_remote_retention_days'] ?? 14);
+                    $ftp->cleanOldBackupsByDays($remoteDir, $retentionDays, 'backup_full_');
+                }
+                
                 $ftp->disconnect();
 
-                // If local storage is not enabled, remove the local copy
                 if (empty($settings['local_enabled'])) {
                     File::delete($filePath);
                 }
@@ -212,12 +233,27 @@ class BackupTaskController extends Controller
             }
 
             if ($target === 'local') {
-                // Local retention cleanup
-                $localDays = intval($settings['local_retention_days'] ?? 7);
-                $cutoff = now()->subDays($localDays)->getTimestamp();
-                foreach (File::files($backupDir) as $f) {
-                    if (str_starts_with($f->getFilename(), 'backup_') || str_starts_with($f->getFilename(), 'db_') || str_starts_with($f->getFilename(), 'files_')) {
-                        if ($f->getMTime() < $cutoff) {
+                if ($type === 'db') {
+                    $localDays = intval($settings['db_local_retention_days'] ?? 3);
+                    $cutoff = now()->subDays($localDays)->getTimestamp();
+                    foreach (File::files($backupDir) as $f) {
+                        if (str_starts_with($f->getFilename(), 'db_') && $f->getMTime() < $cutoff) {
+                            File::delete($f->getPathname());
+                        }
+                    }
+                } elseif ($type === 'files') {
+                    $localDays = intval($settings['files_local_retention_days'] ?? 14);
+                    $cutoff = now()->subDays($localDays)->getTimestamp();
+                    foreach (File::files($backupDir) as $f) {
+                        if (str_starts_with($f->getFilename(), 'files_') && $f->getMTime() < $cutoff) {
+                            File::delete($f->getPathname());
+                        }
+                    }
+                } else {
+                    $localDays = intval($settings['files_local_retention_days'] ?? 14);
+                    $cutoff = now()->subDays($localDays)->getTimestamp();
+                    foreach (File::files($backupDir) as $f) {
+                        if (str_starts_with($f->getFilename(), 'backup_full_') && $f->getMTime() < $cutoff) {
                             File::delete($f->getPathname());
                         }
                     }
@@ -275,7 +311,7 @@ class BackupTaskController extends Controller
         $timestamp = now()->format('Y-m-d_H-i-s');
         $tempFiles = [];
 
-        // 1. Files tar (excluding vendor and node_modules)
+        // 1. Files tar
         $filesTar = "{$backupDir}/temp_files_{$timestamp}.tar";
         $tempFiles[] = $filesTar;
         $process = new Process([
@@ -307,7 +343,7 @@ class BackupTaskController extends Controller
             }
         }
 
-        // 3. Final tar.gz archive
+        // 3. Final archive
         try {
             $tarCmd = ['tar', '-czf', $destPath, '-C', $backupDir];
             foreach ($tempFiles as $tf) {
@@ -372,20 +408,47 @@ class BackupTaskController extends Controller
         return back()->with('error', 'فایل یافت نشد.');
     }
 
-    private function updateCronJob(Service $service, array $settings)
+    private function updateCronJobs(Service $service, array $settings)
     {
-        $cronJobName = 'backup-service-' . $service->id;
-        $command = "php " . base_path('artisan') . " backup:run-service " . $service->id;
-        $existingJob = $this->cron->findJobByName($cronJobName);
+        try {
+            // 1. Database Backup Cron
+            $dbCronName = 'backup-service-' . $service->id . '-db';
+            $dbCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=db";
+            $existingDbJob = $this->cron->findJobByName($dbCronName);
 
-        if ($settings['enabled'] && !empty($settings['cron_expression'])) {
-            if ($existingJob) {
-                $this->cron->update($existingJob['id'], $cronJobName, $settings['cron_expression'], $command, null, true);
-            } else {
-                $this->cron->create($cronJobName, $settings['cron_expression'], $command, null, true);
+            if (!empty($settings['db_enabled']) && !empty($settings['db_cron_expression'])) {
+                if ($existingDbJob) {
+                    $this->cron->update($existingDbJob['id'], $dbCronName, $settings['db_cron_expression'], $dbCommand, null, true);
+                } else {
+                    $this->cron->create($dbCronName, $settings['db_cron_expression'], $dbCommand, null, true);
+                }
+            } elseif ($existingDbJob) {
+                $this->cron->delete($existingDbJob['id']);
             }
-        } elseif ($existingJob) {
-            $this->cron->delete($existingJob['id']);
+
+            // 2. Files Backup Cron
+            $filesCronName = 'backup-service-' . $service->id . '-files';
+            $filesCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=files";
+            $existingFilesJob = $this->cron->findJobByName($filesCronName);
+
+            if (!empty($settings['files_enabled']) && !empty($settings['files_cron_expression'])) {
+                if ($existingFilesJob) {
+                    $this->cron->update($existingFilesJob['id'], $filesCronName, $settings['files_cron_expression'], $filesCommand, null, true);
+                } else {
+                    $this->cron->create($filesCronName, $settings['files_cron_expression'], $filesCommand, null, true);
+                }
+            } elseif ($existingFilesJob) {
+                $this->cron->delete($existingFilesJob['id']);
+            }
+
+            // Delete legacy single job if exists
+            $legacyName = 'backup-service-' . $service->id;
+            $legacyJob = $this->cron->findJobByName($legacyName);
+            if ($legacyJob) {
+                $this->cron->delete($legacyJob['id']);
+            }
+        } catch (\Exception $e) {
+            Log::warning("Could not update cron jobs for service {$service->id}: " . $e->getMessage());
         }
     }
 
@@ -410,7 +473,7 @@ class BackupTaskController extends Controller
         });
 
         $recent = [];
-        foreach (array_slice($valid_files, 0, 15) as $file) {
+        foreach (array_slice($valid_files, 0, 20) as $file) {
             try {
                 $recent[] = [
                     'name' => $file->getFilename(),
@@ -428,23 +491,42 @@ class BackupTaskController extends Controller
         try {
             if (File::exists($settingsPath) && is_readable($settingsPath)) {
                 $settings = json_decode(File::get($settingsPath), true);
-                if (is_array($settings)) return $settings;
+                if (is_array($settings)) {
+                    // Backward compatibility mappings
+                    $settings['db_enabled'] = $settings['db_enabled'] ?? ($settings['include_db'] ?? true);
+                    $settings['db_cron_expression'] = $settings['db_cron_expression'] ?? ($settings['cron_expression'] ?? '0 2 * * *');
+                    $settings['db_local_retention_days'] = $settings['db_local_retention_days'] ?? ($settings['local_retention_days'] ?? 3);
+                    $settings['db_remote_retention_days'] = $settings['db_remote_retention_days'] ?? ($settings['remote_retention_days'] ?? 3);
+
+                    $settings['files_enabled'] = $settings['files_enabled'] ?? ($settings['include_files'] ?? true);
+                    $settings['files_cron_expression'] = $settings['files_cron_expression'] ?? '0 2 * * 5';
+                    $settings['files_local_retention_days'] = $settings['files_local_retention_days'] ?? 14;
+                    $settings['files_remote_retention_days'] = $settings['files_remote_retention_days'] ?? 14;
+
+                    $settings['local_enabled'] = $settings['local_enabled'] ?? true;
+                    $settings['remote_enabled'] = $settings['remote_enabled'] ?? false;
+                    return $settings;
+                }
             }
         } catch (\Exception $e) {}
 
         return [
-            'enabled' => false,
-            'cron_expression' => '0 2 * * *',
-            'include_files' => true,
-            'include_db' => false,
+            'db_enabled' => true,
+            'db_cron_expression' => '0 2 * * *',
+            'db_local_retention_days' => 3,
+            'db_remote_retention_days' => 3,
+
+            'files_enabled' => true,
+            'files_cron_expression' => '0 2 * * 5',
+            'files_local_retention_days' => 14,
+            'files_remote_retention_days' => 14,
+
             'local_enabled' => true,
-            'local_retention_days' => 7,
             'remote_enabled' => false,
             'remote_host' => '80.249.115.114',
             'remote_user' => 'mhvardi@backup.vardicrm.ir',
             'remote_password' => 'pqDd2PZ1V8Pkq6r3',
             'remote_path' => '/public_html',
-            'remote_retention_days' => 7,
         ];
     }
 

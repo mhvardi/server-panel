@@ -92,9 +92,9 @@ class FtpBackupDriver
     }
 
     /**
-     * Clean old backups by Days
+     * Clean old backups by Days and optional Prefix filter (e.g. 'db_', 'files_', 'backup_')
      */
-    public function cleanOldBackupsByDays(string $remoteDir, int $days): int
+    public function cleanOldBackupsByDays(string $remoteDir, int $days, string $prefix = ''): int
     {
         $this->assertConnected();
         if ($days <= 0) return 0;
@@ -108,12 +108,17 @@ class FtpBackupDriver
             if ($base === '.' || $base === '..') continue;
             if (!preg_match('/\.(tar\.gz|zip|sql\.gz|tar)$/i', $base)) continue;
 
+            if ($prefix !== '' && !str_starts_with($base, $prefix)) {
+                continue;
+            }
+
             $filePath = (str_starts_with($file, '/')) ? $file : $remoteDir . '/' . $file;
             $mtime = @ftp_mdtm($this->conn, $filePath);
             
             if ($mtime !== -1 && $mtime < $cutoff) {
                 if (@ftp_delete($this->conn, $filePath)) {
-                    $this->addLog("🗑️ حذف بکاپ قدیمی از FTP (بیشتر از {$days} روز): " . $base);
+                    $prefixLabel = $prefix ? " [فیلتر {$prefix}]" : "";
+                    $this->addLog("🗑️ حذف بکاپ قدیمی از FTP (بیشتر از {$days} روز){$prefixLabel}: " . $base);
                     $deleted++;
                 }
             }
