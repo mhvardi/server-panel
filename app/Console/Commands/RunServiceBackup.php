@@ -84,20 +84,17 @@ class RunServiceBackup extends Command
         if (!empty($settings['remote_enabled']) && !empty($settings['remote_host'])) {
             try {
                 $port = (int) ($settings['remote_port'] ?? 21);
-                $this->addLog("اتصال به FTP ({$settings['remote_host']}:{$port}) — تلاش 1/3...");
                 $ftpDriver = new FtpBackupDriver(
                     $settings['remote_host'],
                     $port,
-                    $settings['remote_user'],
-                    $settings['remote_password']
+                    $settings['remote_user'] ?? '',
+                    $settings['remote_password'] ?? ''
                 );
-                $this->addLog("✅ اتصال به FTP برقرار شد (Passive Mode).");
+                $ftpDriver->connect();
             } catch (\Exception $e) {
                 $this->addLog("❌ خطا در اتصال به FTP: " . $e->getMessage());
-                if ($this->option('ftp-only')) {
-                    $this->saveLogs($service, $settings, $settingsPath, false, true, 0);
-                    return 1;
-                }
+                $ftpDriver = null;
+                $hasError = true;
             }
         }
 
@@ -107,8 +104,10 @@ class RunServiceBackup extends Command
         }
         if ($ftpDriver) {
             $remoteDir .= '/' . $service->domain;
-            if (!$ftpDriver->directoryExists($remoteDir)) {
-                $ftpDriver->createDirectory($remoteDir);
+            try {
+                $ftpDriver->ensureRemoteDir($remoteDir);
+            } catch (\Exception $e) {
+                $this->addLog("❌ خطا در ساخت/بررسی پوشه در FTP: " . $e->getMessage());
             }
         }
 
