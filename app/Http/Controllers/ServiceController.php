@@ -375,11 +375,29 @@ class ServiceController extends Controller
         $debugHeader = $this->nginxSafeName($fullDomain);
         $forceHttps = (bool) env('SERVICE_FORCE_HTTPS', false);
 
-        $httpServer = $forceHttps
-            ? "server {\n    listen 80;\n    listen [::]:80;\n    server_name {$fullDomain};\n    return 301 https://\$host\$request_uri;\n}\n"
-            : "server {\n    listen 80;\n    listen [::]:80;\n    server_name {$fullDomain};\n    add_header X-Debug-Server \"{$debugHeader}-http\" always;\n    root {$rootPath};\n    index index.php index.html index.htm;\n    charset utf-8;\n    access_log /var/log/nginx/{$debugHeader}-access.log;\n    error_log  /var/log/nginx/{$debugHeader}-error.log;\n    location / {\n        try_files \$uri \$uri/ /index.php?\$query_string;\n    }\n    location = /favicon.ico { access_log off; log_not_found off; }\n    location = /robots.txt  { access_log off; log_not_found off; }\n    location ~ \\.php$ {\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{$phpSock};\n    }\n    location ~ /\\. {\n        deny all;\n    }\n}\n";
+        $service = Service::where('domain', $fullDomain)->orWhere('path', $servicePath)->first();
+        $allDomains = [$fullDomain];
+        if (!str_starts_with($fullDomain, 'www.')) {
+            $allDomains[] = "www.{$fullDomain}";
+        }
+        if ($service) {
+            foreach ($service->getClientDomains() as $cd) {
+                $cd = trim($cd);
+                if (!empty($cd)) {
+                    $allDomains[] = $cd;
+                    if (!str_starts_with($cd, 'www.')) {
+                        $allDomains[] = "www.{$cd}";
+                    }
+                }
+            }
+        }
+        $serverNameStr = implode(' ', array_unique($allDomains));
 
-        $httpsServer = "server {\n    listen 443 ssl;\n    listen [::]:443 ssl;\n    server_name {$fullDomain};\n    add_header X-Debug-Server \"{$debugHeader}-https\" always;\n    root {$rootPath};\n    index index.php index.html index.htm;\n    charset utf-8;\n    access_log /var/log/nginx/{$debugHeader}-ssl-access.log;\n    error_log  /var/log/nginx/{$debugHeader}-ssl-error.log;\n    ssl_certificate     {$ssl['cert']};\n    ssl_certificate_key {$ssl['key']};\n    include /etc/letsencrypt/options-ssl-nginx.conf;\n    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;\n    location / {\n        try_files \$uri \$uri/ /index.php?\$query_string;\n    }\n    location = /favicon.ico { access_log off; log_not_found off; }\n    location = /robots.txt  { access_log off; log_not_found off; }\n    location ~ \\.php$ {\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{$phpSock};\n    }\n    location ~ /\\. {\n        deny all;\n    }\n}\n";
+        $httpServer = $forceHttps
+            ? "server {\n    listen 80;\n    listen [::]:80;\n    server_name {$serverNameStr};\n    return 301 https://\$host\$request_uri;\n}\n"
+            : "server {\n    listen 80;\n    listen [::]:80;\n    server_name {$serverNameStr};\n    add_header X-Debug-Server \"{$debugHeader}-http\" always;\n    root {$rootPath};\n    index index.php index.html index.htm;\n    charset utf-8;\n    access_log /var/log/nginx/{$debugHeader}-access.log;\n    error_log  /var/log/nginx/{$debugHeader}-error.log;\n    location / {\n        try_files \$uri \$uri/ /index.php?\$query_string;\n    }\n    location = /favicon.ico { access_log off; log_not_found off; }\n    location = /robots.txt  { access_log off; log_not_found off; }\n    location ~ \\.php$ {\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{$phpSock};\n    }\n    location ~ /\\. {\n        deny all;\n    }\n}\n";
+
+        $httpsServer = "server {\n    listen 443 ssl;\n    listen [::]:443 ssl;\n    server_name {$serverNameStr};\n    add_header X-Debug-Server \"{$debugHeader}-https\" always;\n    root {$rootPath};\n    index index.php index.html index.htm;\n    charset utf-8;\n    access_log /var/log/nginx/{$debugHeader}-ssl-access.log;\n    error_log  /var/log/nginx/{$debugHeader}-ssl-error.log;\n    ssl_certificate     {$ssl['cert']};\n    ssl_certificate_key {$ssl['key']};\n    include /etc/letsencrypt/options-ssl-nginx.conf;\n    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;\n    location / {\n        try_files \$uri \$uri/ /index.php?\$query_string;\n    }\n    location = /favicon.ico { access_log off; log_not_found off; }\n    location = /robots.txt  { access_log off; log_not_found off; }\n    location ~ \\.php$ {\n        include snippets/fastcgi-php.conf;\n        fastcgi_pass unix:{$phpSock};\n    }\n    location ~ /\\. {\n        deny all;\n    }\n}\n";
 
         $content = $httpServer . "\n" . $httpsServer;
         $file = $this->nginxServiceConfNameForSubdomain($fullDomain);
