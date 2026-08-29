@@ -83,12 +83,13 @@ class RunServiceBackup extends Command
         $ftpDriver = null;
         if (!empty($settings['remote_enabled']) && !empty($settings['remote_host'])) {
             try {
-                $this->addLog("اتصال به FTP ({$settings['remote_host']}:21) — تلاش 1/3...");
+                $port = (int) ($settings['remote_port'] ?? 21);
+                $this->addLog("اتصال به FTP ({$settings['remote_host']}:{$port}) — تلاش 1/3...");
                 $ftpDriver = new FtpBackupDriver(
                     $settings['remote_host'],
+                    $port,
                     $settings['remote_user'],
-                    $settings['remote_password'],
-                    $settings['remote_port'] ?? 21
+                    $settings['remote_password']
                 );
                 $this->addLog("✅ اتصال به FTP برقرار شد (Passive Mode).");
             } catch (\Exception $e) {

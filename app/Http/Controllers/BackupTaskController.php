@@ -351,12 +351,14 @@ class BackupTaskController extends Controller
             'remote_host' => 'required|string',
             'remote_user' => 'required|string',
             'remote_password' => 'required|string',
+            'remote_port' => 'nullable|integer',
         ]);
         
         $result = FtpBackupDriver::testConnection(
             $request->remote_host, 
             $request->remote_user, 
-            $request->remote_password
+            $request->remote_password,
+            (int) ($request->remote_port ?? 21)
         );
         return response()->json($result);
     }
