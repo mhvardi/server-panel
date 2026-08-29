@@ -92,16 +92,15 @@ class FtpBackupDriver
     }
 
     /**
-     * Clean old backups by Days and optional Prefix filter (e.g. 'db_', 'files_', 'backup_')
+     * Clean old backups by keeping the last N files (Count-based retention)
      */
-    public function cleanOldBackupsByDays(string $remoteDir, int $days, string $prefix = ''): int
+    public function cleanOldBackupsByCount(string $remoteDir, int $keepCount, string $prefix = ''): int
     {
         $this->assertConnected();
-        if ($days <= 0) return 0;
+        if ($keepCount <= 0) return 0;
 
         $rawFiles = @ftp_nlist($this->conn, $remoteDir) ?: [];
-        $deleted = 0;
-        $cutoff = time() - ($days * 86400);
+        $validFiles = [];
 
         foreach ($rawFiles as $file) {
             $base = basename($file);
@@ -114,15 +113,32 @@ class FtpBackupDriver
 
             $filePath = (str_starts_with($file, '/')) ? $file : $remoteDir . '/' . $file;
             $mtime = @ftp_mdtm($this->conn, $filePath);
-            
-            if ($mtime !== -1 && $mtime < $cutoff) {
-                if (@ftp_delete($this->conn, $filePath)) {
-                    $prefixLabel = $prefix ? " [فیلتر {$prefix}]" : "";
-                    $this->addLog("🗑️ حذف بکاپ قدیمی از FTP (بیشتر از {$days} روز){$prefixLabel}: " . $base);
-                    $deleted++;
-                }
+            if ($mtime !== -1) {
+                $validFiles[] = [
+                    'path' => $filePath,
+                    'base' => $base,
+                    'mtime' => $mtime
+                ];
             }
         }
+
+        // Sort by modified time descending (newest first)
+        usort($validFiles, function($a, $b) {
+            return $b['mtime'] <=> $a['mtime'];
+        });
+
+        // The ones to delete are those after index $keepCount
+        $toDelete = array_slice($validFiles, $keepCount);
+        $deleted = 0;
+
+        foreach ($toDelete as $f) {
+            if (@ftp_delete($this->conn, $f['path'])) {
+                $prefixLabel = $prefix ? " [فیلتر {$prefix}]" : "";
+                $this->addLog("🗑️ حذف بکاپ قدیمی از FTP (نگهداری {$keepCount} نسخه آخر){$prefixLabel}: " . $f['base']);
+                $deleted++;
+            }
+        }
+
         return $deleted;
     }
 

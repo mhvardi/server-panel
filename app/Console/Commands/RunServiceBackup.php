@@ -64,11 +64,12 @@ class RunServiceBackup extends Command
         $settings = json_decode(File::get($settingsPath), true) ?: [];
 
         $type = $this->option('type') ?: 'all';
+        if ($type === 'full') $type = 'all';
         $isDryRun = $this->option('dry-run');
 
         $this->addLog("🚀 شروع عملیات بکاپ (نوع: {$type}) برای سرویس: {$service->name} ({$service->domain})");
         if ($isDryRun) {
-            $this->addLog("⚠️ اجرای حالت Dry-Run (شبیه‌سازی)");
+            $this->addLog("⚠️ اجرای آزمایشی (Dry Run)");
         }
 
         $backupDir = storage_path('app/backups/' . $service->id);
@@ -80,19 +81,33 @@ class RunServiceBackup extends Command
         $hasError = false;
 
         $ftpDriver = null;
-        if (!empty($settings['remote_enabled'])) {
+        if (!empty($settings['remote_enabled']) && !empty($settings['remote_host'])) {
             try {
+                $this->addLog("اتصال به FTP ({$settings['remote_host']}:21) — تلاش 1/3...");
                 $ftpDriver = new FtpBackupDriver(
-                    $settings['remote_host'], 21,
-                    $settings['remote_user'], $settings['remote_password']
+                    $settings['remote_host'],
+                    $settings['remote_user'],
+                    $settings['remote_password'],
+                    $settings['remote_port'] ?? 21
                 );
-                $ftpDriver->connect();
-                $remoteDir = rtrim($settings['remote_path'] ?? '/public_html', '/') . '/' . ($service->domain ?: $service->name);
-                $ftpDriver->ensureRemoteDir($remoteDir);
+                $this->addLog("✅ اتصال به FTP برقرار شد (Passive Mode).");
             } catch (\Exception $e) {
-                $this->addLog("❌ خطای اولیه اتصال FTP: " . $e->getMessage());
-                $hasError = true;
-                $ftpDriver = null;
+                $this->addLog("❌ خطا در اتصال به FTP: " . $e->getMessage());
+                if ($this->option('ftp-only')) {
+                    $this->saveLogs($service, $settings, $settingsPath, false, true, 0);
+                    return 1;
+                }
+            }
+        }
+
+        $remoteDir = trim($settings['remote_path'] ?? '', '/');
+        if ($remoteDir !== '') {
+            $remoteDir = '/' . $remoteDir;
+        }
+        if ($ftpDriver) {
+            $remoteDir .= '/' . $service->domain;
+            if (!$ftpDriver->directoryExists($remoteDir)) {
+                $ftpDriver->createDirectory($remoteDir);
             }
         }
 
@@ -135,8 +150,8 @@ class RunServiceBackup extends Command
                         $remoteFileName = basename($dbFile);
                         $this->addLog("🌐 در حال آپلود دیتابیس به FTP...");
                         $ftpDriver->upload($dbFile, $remoteDir . '/' . $remoteFileName);
-                        $retentionDays = intval($settings['db_remote_retention_days'] ?? 3);
-                        $ftpDriver->cleanOldBackupsByDays($remoteDir, $retentionDays, 'db_');
+                        $retentionCount = intval($settings['db_remote_retention_days'] ?? 3);
+                        $ftpDriver->cleanOldBackupsByCount($remoteDir, $retentionCount, 'db_');
                         $ftpUploaded = true;
                     }
 
@@ -144,16 +159,21 @@ class RunServiceBackup extends Command
                     if (empty($settings['local_enabled'])) {
                         File::delete($dbFile);
                     } else {
-                        $localDays = intval($settings['db_local_retention_days'] ?? 3);
-                        $cutoff = now()->subDays($localDays)->getTimestamp();
-                        $deleted = 0;
+                        $localKeep = intval($settings['db_local_retention_days'] ?? 3);
+                        $allFiles = [];
                         foreach (File::files($backupDir) as $f) {
-                            if (str_starts_with($f->getFilename(), 'db_') && $f->getMTime() < $cutoff) {
-                                File::delete($f->getPathname());
-                                $deleted++;
+                            if (str_starts_with($f->getFilename(), 'db_')) {
+                                $allFiles[] = $f;
                             }
                         }
-                        $this->addLog("🧹 پاک‌سازی دیتابیس‌های قدیمی محلی (بیشتر از {$localDays} روز): {$deleted} فایل حذف شد.");
+                        usort($allFiles, fn($a, $b) => $b->getMTime() <=> $a->getMTime());
+                        $toDelete = array_slice($allFiles, $localKeep);
+                        $deleted = 0;
+                        foreach ($toDelete as $f) {
+                            File::delete($f->getPathname());
+                            $deleted++;
+                        }
+                        $this->addLog("🧹 پاک‌سازی دیتابیس‌های قدیمی محلی (نگهداری {$localKeep} نسخه آخر): {$deleted} فایل حذف شد.");
                     }
 
                 } catch (\Exception $e) {
@@ -195,8 +215,8 @@ class RunServiceBackup extends Command
                         $remoteFileName = basename($filesArchive);
                         $this->addLog("🌐 در حال آپلود فایل‌های پروژه به FTP...");
                         $ftpDriver->upload($filesArchive, $remoteDir . '/' . $remoteFileName);
-                        $retentionDays = intval($settings['files_remote_retention_days'] ?? 14);
-                        $ftpDriver->cleanOldBackupsByDays($remoteDir, $retentionDays, 'files_');
+                        $retentionCount = intval($settings['files_remote_retention_days'] ?? 14);
+                        $ftpDriver->cleanOldBackupsByCount($remoteDir, $retentionCount, 'files_');
                         $ftpUploaded = true;
                     }
 
@@ -204,16 +224,21 @@ class RunServiceBackup extends Command
                     if (empty($settings['local_enabled'])) {
                         File::delete($filesArchive);
                     } else {
-                        $localDays = intval($settings['files_local_retention_days'] ?? 14);
-                        $cutoff = now()->subDays($localDays)->getTimestamp();
-                        $deleted = 0;
+                        $localKeep = intval($settings['files_local_retention_days'] ?? 14);
+                        $allFiles = [];
                         foreach (File::files($backupDir) as $f) {
-                            if (str_starts_with($f->getFilename(), 'files_') && $f->getMTime() < $cutoff) {
-                                File::delete($f->getPathname());
-                                $deleted++;
+                            if (str_starts_with($f->getFilename(), 'files_') || str_starts_with($f->getFilename(), 'backup_full_')) {
+                                $allFiles[] = $f;
                             }
                         }
-                        $this->addLog("🧹 پاک‌سازی فایل‌های قدیمی محلی (بیشتر از {$localDays} روز): {$deleted} فایل حذف شد.");
+                        usort($allFiles, fn($a, $b) => $b->getMTime() <=> $a->getMTime());
+                        $toDelete = array_slice($allFiles, $localKeep);
+                        $deleted = 0;
+                        foreach ($toDelete as $f) {
+                            File::delete($f->getPathname());
+                            $deleted++;
+                        }
+                        $this->addLog("🧹 پاک‌سازی فایل‌های قدیمی محلی (نگهداری {$localKeep} نسخه آخر): {$deleted} فایل حذف شد.");
                     }
 
                 } catch (\Exception $e) {

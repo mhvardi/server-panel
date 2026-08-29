@@ -177,17 +177,17 @@
                             <input type="text" name="db_cron_custom" id="db_cron_custom" value="{{ old('db_cron_custom', $settings['db_cron_expression'] ?? '0 2 * * *') }}" class="w-full rounded-xl border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 text-left font-mono focus:ring-2 focus:ring-blue-500" dir="ltr">
                         </div>
                         <div>
-                            <label for="db_local_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">مدت نگهداری دیتابیس در Local</label>
+                            <label for="db_local_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">تعداد نگهداری دیتابیس در Local</label>
                             <div class="flex rounded-xl shadow-sm">
                                 <input type="number" name="db_local_retention_days" id="db_local_retention_days" value="{{ old('db_local_retention_days', $settings['db_local_retention_days'] ?? 3) }}" min="1" class="w-full rounded-r-xl border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 text-center focus:ring-2 focus:ring-blue-500">
-                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">روز</span>
+                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">نسخه</span>
                             </div>
                         </div>
                         <div>
-                            <label for="db_remote_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">مدت نگهداری دیتابیس در FTP</label>
+                            <label for="db_remote_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">تعداد نگهداری دیتابیس در FTP</label>
                             <div class="flex rounded-xl shadow-sm">
                                 <input type="number" name="db_remote_retention_days" id="db_remote_retention_days" value="{{ old('db_remote_retention_days', $settings['db_remote_retention_days'] ?? 3) }}" min="1" class="w-full rounded-r-xl border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 text-center focus:ring-2 focus:ring-blue-500">
-                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">روز</span>
+                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">نسخه</span>
                             </div>
                         </div>
                     </div>
@@ -232,17 +232,17 @@
                             <input type="text" name="files_cron_custom" id="files_cron_custom" value="{{ old('files_cron_custom', $settings['files_cron_expression'] ?? '0 2 * * 5') }}" class="w-full rounded-xl border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 text-left font-mono focus:ring-2 focus:ring-emerald-500" dir="ltr">
                         </div>
                         <div>
-                            <label for="files_local_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">مدت نگهداری فایل‌ها در Local</label>
+                            <label for="files_local_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">تعداد نگهداری فایل‌ها در Local</label>
                             <div class="flex rounded-xl shadow-sm">
                                 <input type="number" name="files_local_retention_days" id="files_local_retention_days" value="{{ old('files_local_retention_days', $settings['files_local_retention_days'] ?? 14) }}" min="1" class="w-full rounded-r-xl border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 text-center focus:ring-2 focus:ring-emerald-500">
-                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">روز</span>
+                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">نسخه</span>
                             </div>
                         </div>
                         <div>
-                            <label for="files_remote_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">مدت نگهداری فایل‌ها در FTP</label>
+                            <label for="files_remote_retention_days" class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">تعداد نگهداری فایل‌ها در FTP</label>
                             <div class="flex rounded-xl shadow-sm">
                                 <input type="number" name="files_remote_retention_days" id="files_remote_retention_days" value="{{ old('files_remote_retention_days', $settings['files_remote_retention_days'] ?? 14) }}" min="1" class="w-full rounded-r-xl border-gray-200 dark:border-gray-700 dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-200 text-center focus:ring-2 focus:ring-emerald-500">
-                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">روز</span>
+                                <span class="inline-flex items-center px-3 rounded-l-xl border border-r-0 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/60 text-gray-500 dark:text-gray-400 text-xs font-medium">نسخه</span>
                             </div>
                         </div>
                     </div>
