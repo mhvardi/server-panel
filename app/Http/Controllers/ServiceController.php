@@ -1776,6 +1776,16 @@ class ServiceController extends Controller
                 ]
             );
 
+            // Sync with Domain model (Domain Control Center)
+            \App\Models\Domain::updateOrCreate(
+                ['domain' => $customDomain],
+                [
+                    'service_id'   => $service->id,
+                    'status'       => \App\Models\Domain::STATUS_CONNECTED,
+                    'dns_provider' => \App\Models\Domain::DNS_EXTERNAL,
+                ]
+            );
+
             // Recreate nginx config to handle new server_name if needed
             if ($service->type === 'subdomain') {
                 $this->createNginxConfigSubdomain($service->domain, $service->path);
@@ -1798,6 +1808,9 @@ class ServiceController extends Controller
         try {
             $domain = $domainMapping->source_domain;
             $domainMapping->delete();
+
+            // Sync with Domain model
+            \App\Models\Domain::where('domain', $domain)->delete();
 
             if ($service->type === 'subdomain') {
                 $this->createNginxConfigSubdomain($service->domain, $service->path);

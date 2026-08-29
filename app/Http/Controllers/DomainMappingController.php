@@ -76,6 +76,18 @@ class DomainMappingController extends Controller
             ]
         );
 
+        // Sync with Domain model (Domain Control Center)
+        \App\Models\Domain::updateOrCreate(
+            ['domain' => $sourceDomain],
+            [
+                'service_id'      => $service->id,
+                'status'          => \App\Models\Domain::STATUS_CONNECTED,
+                'dns_provider'    => \App\Models\Domain::DNS_ARVAN,
+                'arvan_zone'      => $arvanDomain,
+                'arvan_record_id' => $dnsRecordId,
+            ]
+        );
+
         $this->dispatchConfigurationTask($mapping);
         $this->arvan->purgeCache($arvanDomain);
 
@@ -133,6 +145,20 @@ class DomainMappingController extends Controller
             ]
         );
 
+        // Sync with Domain model
+        $parentDomainRecord = \App\Models\Domain::where('domain', $parentMapping->source_domain)->first();
+        \App\Models\Domain::updateOrCreate(
+            ['domain' => $parkedDomain],
+            [
+                'service_id'      => $service->id,
+                'status'          => \App\Models\Domain::STATUS_PARKED_ON,
+                'parked_on_id'    => $parentDomainRecord?->id,
+                'dns_provider'    => $parkedType === 'arvan' ? \App\Models\Domain::DNS_ARVAN : \App\Models\Domain::DNS_EXTERNAL,
+                'arvan_zone'      => $parkedType === 'arvan' ? ($request->arvan_domain ?? null) : null,
+                'arvan_record_id' => $dnsRecordId,
+            ]
+        );
+
         // تسک Nginx alias: دامنه دوم را به همان config دامنه اول اضافه می‌کند
         $aliasTask = $this->nginx->addServerAlias($parentMapping->source_domain, $parkedDomain);
         $this->dispatchTask(array_merge($aliasTask, [
@@ -169,6 +195,16 @@ class DomainMappingController extends Controller
                 'is_primary'         => true,
                 'dns_record_id'      => null,
                 'arvan_domain'       => null,
+            ]
+        );
+
+        // Sync with Domain model
+        \App\Models\Domain::updateOrCreate(
+            ['domain' => $directDomain],
+            [
+                'service_id'   => $service->id,
+                'status'       => \App\Models\Domain::STATUS_CONNECTED,
+                'dns_provider' => \App\Models\Domain::DNS_EXTERNAL,
             ]
         );
 
@@ -239,6 +275,9 @@ class DomainMappingController extends Controller
 
         $domain = $domainMapping->source_domain;
         $domainMapping->delete();
+
+        // Sync deletion with Domain model
+        \App\Models\Domain::where('domain', $domain)->delete();
 
         return redirect()->route('domain-mappings.index')
             ->with('success', "دامنه «{$domain}» و رکورد DNS مربوطه حذف شدند.");

@@ -30,7 +30,7 @@
 
         <!-- Section: Services -->
         <div>
-            <p x-show="!sidebarCollapsed" class="px-4 mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-600">سرویس‌ها و دامنه‌ها</p>
+            <p x-show="!sidebarCollapsed" class="px-4 mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-600">سرویس‌ها</p>
             <ul class="space-y-1.5">
                 <li>
                     <a href="{{ route('services.index') }}"
@@ -38,14 +38,6 @@
                        {{ request()->routeIs('services.*') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white' }}">
                         <svg class="w-5 h-5 opacity-60 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L12 15.25l5.571-3m-11.142 0l5.571 3L12 15.25l5.571-3M3.25 12l8.75-4.75L20.75 12l-8.75 4.75L3.25 12z" /></svg>
                         <span x-show="!sidebarCollapsed">مدیریت سرویس‌ها</span>
-                    </a>
-                </li>
-                <li>
-                    <a href="{{ route('domain-mappings.index') }}"
-                       class="group flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all
-                       {{ request()->routeIs('domain-mappings.*') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white' }}">
-                        <svg class="w-5 h-5 opacity-60 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" /></svg>
-                        <span x-show="!sidebarCollapsed">دامنه‌های اختصاصی</span>
                     </a>
                 </li>
             </ul>

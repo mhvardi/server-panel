@@ -206,14 +206,26 @@ class Service extends Model
         return $this->hasMany(\App\Models\DomainMapping::class);
     }
 
+    public function domains()
+    {
+        return $this->hasMany(\App\Models\Domain::class);
+    }
+
     public function getClientDomains(): array
     {
+        $domainList = $this->domains()->pluck('domain')->filter()->values()->toArray();
+        if (!empty($domainList)) {
+            return $domainList;
+        }
         return $this->domainMappings()->pluck('source_domain')->filter()->values()->toArray();
     }
 
     public function getPrimaryDomain(): string
     {
-        $clientDomain = $this->domainMappings()->latest()->value('source_domain');
+        $clientDomain = $this->domains()->where('status', \App\Models\Domain::STATUS_CONNECTED)->latest()->value('domain');
+        if (empty($clientDomain)) {
+            $clientDomain = $this->domainMappings()->latest()->value('source_domain');
+        }
         return !empty($clientDomain) ? trim($clientDomain) : trim($this->domain);
     }
 
