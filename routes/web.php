@@ -17,6 +17,7 @@ use App\Http\Controllers\DomainMappingController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\FileManagerController;
 use App\Http\Controllers\DiskCleanupController;
+use App\Http\Controllers\DomainCenterController;
 
 
 // Installation Routes
@@ -168,4 +169,19 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('disk-cleanup')-
     Route::post('/cleanup',   [DiskCleanupController::class, 'cleanup'])->name('cleanup');
     Route::get('/analyze',    [DiskCleanupController::class, 'analyze'])->name('analyze');
     Route::post('/delete',    [DiskCleanupController::class, 'deleteItem'])->name('delete');
+});
+
+// Domain Center Routes
+Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('domain-center')->name('domain-center.')->group(function () {
+    Route::get('/',                         [DomainCenterController::class, 'index'])->name('index');
+    Route::get('/domains',                  [DomainCenterController::class, 'domains'])->name('domains');
+    Route::get('/connect',                  [DomainCenterController::class, 'showConnect'])->name('connect');
+    Route::post('/connect/arvan',           [DomainCenterController::class, 'connectArvan'])->name('connect.arvan');
+    Route::post('/connect/direct',          [DomainCenterController::class, 'connectDirect'])->name('connect.direct');
+    Route::get('/parked',                   [DomainCenterController::class, 'showParked'])->name('parked');
+    Route::post('/parked',                  [DomainCenterController::class, 'connectParked'])->name('parked.store');
+    Route::post('/{domain}/assign',         [DomainCenterController::class, 'assignService'])->name('assign');
+    Route::delete('/{domain}',              [DomainCenterController::class, 'destroy'])->name('destroy');
+    Route::get('/ns-settings',              [DomainCenterController::class, 'nsSettings'])->name('ns-settings');
+    Route::post('/check-dns',               [DomainCenterController::class, 'checkDns'])->name('check-dns');
 });

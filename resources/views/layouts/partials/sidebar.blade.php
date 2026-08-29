@@ -48,8 +48,43 @@
                         <span x-show="!sidebarCollapsed">دامنه‌های اختصاصی</span>
                     </a>
                 </li>
-            </ul>
-        </div>
+                <!-- Domain Center Accordion -->
+                <li x-data="{ open: {{ request()->routeIs('domain-center.*') ? 'true' : 'false' }} }">
+                    <button @click="open = !open"
+                            class="w-full group flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all
+                            {{ request()->routeIs('domain-center.*') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/25' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white' }}">
+                        <div class="flex items-center gap-3">
+                            <svg class="w-5 h-5 opacity-60 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+                            </svg>
+                            <span x-show="!sidebarCollapsed">مرکز دامنه</span>
+                        </div>
+                        <svg x-show="!sidebarCollapsed" class="w-4 h-4 transition-transform duration-200 flex-shrink-0" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </button>
+                    <div x-show="open" class="mt-1 mr-4 space-y-0.5 border-r-2 border-indigo-200 dark:border-indigo-800 pr-2">
+                        <a href="{{ route('domain-center.domains') }}"
+                           class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all
+                           {{ request()->routeIs('domain-center.domains') ? 'text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-900/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/30' }}">
+                            <span x-show="!sidebarCollapsed">دامنه‌های اختصاصی</span>
+                        </a>
+                        <a href="{{ route('domain-center.connect') }}"
+                           class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all
+                           {{ request()->routeIs('domain-center.connect') ? 'text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-900/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/30' }}">
+                            <span x-show="!sidebarCollapsed">اتصال دامنه</span>
+                        </a>
+                        <a href="{{ route('domain-center.parked') }}"
+                           class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all
+                           {{ request()->routeIs('domain-center.parked') ? 'text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-900/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/30' }}">
+                            <span x-show="!sidebarCollapsed">پارک دامین</span>
+                        </a>
+                        <a href="{{ route('domain-center.ns-settings') }}"
+                           class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all
+                           {{ request()->routeIs('domain-center.ns-settings') ? 'text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-900/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/30' }}">
+                            <span x-show="!sidebarCollapsed">تنظیمات Name Servers</span>
+                        </a>
+                    </div>
+                </li>
+
 
         <!-- Section: System & Server -->
         <div>
