@@ -67,6 +67,9 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
     Route::get('/backup-tasks/{service}/log', [BackupTaskController::class, 'getLog'])->name('backup_tasks.log');
     Route::get('/backup-tasks/queue-status', [BackupTaskController::class, 'queueStatus'])->name('backup_tasks.queue_status');
     Route::post('/backup-tasks/test-ftp', [BackupTaskController::class, 'testFtp'])->name('backup_tasks.test_ftp');
+    Route::post('/backup-tasks/{service}/test-db', [BackupTaskController::class, 'testDatabase'])->name('backup_tasks.test_db');
+    Route::post('/backup-tasks/{service}/test-ftp-full', [BackupTaskController::class, 'testFtpFull'])->name('backup_tasks.test_ftp_full');
+    Route::post('/backup-tasks/{service}/test-cron', [BackupTaskController::class, 'testCron'])->name('backup_tasks.test_cron');
     Route::post('/backup-tasks/{service}/manual', [BackupTaskController::class, 'manualBackup'])->name('backup_tasks.manual');
     Route::post('/backup-tasks/{service}/db-now', [BackupTaskController::class, 'backupDatabaseNow'])->name('backup_tasks.db_now');
     Route::post('/backup-tasks/{service}/files-now', [BackupTaskController::class, 'backupFilesNow'])->name('backup_tasks.files_now');

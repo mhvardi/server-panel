@@ -364,6 +364,241 @@ class BackupTaskController extends Controller
         );
         return response()->json($result);
     }
+
+    public function testFtpFull(Request $request, Service $service)
+    {
+        $settings = $this->getBackupSettings($service);
+        $host = $request->remote_host ?: ($settings['remote_host'] ?? '');
+        $port = intval($request->remote_port ?: ($settings['remote_port'] ?? 21));
+        $user = $request->remote_user ?: ($settings['remote_user'] ?? '');
+        $pass = $request->remote_password ?: ($settings['remote_password'] ?? '');
+        $path = $request->remote_path ?: ($settings['remote_path'] ?? '');
+
+        if (empty($host) || empty($user)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'آدرس سرور یا نام کاربری FTP وارد نشده است.',
+                'logs' => ['[' . date('H:i:s') . '] ❌ لطفا اطلاعات هاست FTP را کامل وارد کنید.'],
+            ]);
+        }
+
+        $remoteDir = trim($path, '/');
+        if ($remoteDir !== '') {
+            $remoteDir = '/' . $remoteDir;
+        }
+        $remoteDir .= '/' . $service->domain;
+
+        $res = FtpBackupDriver::testConnectionDetailed($host, $user, $pass, $port, $remoteDir);
+        return response()->json($res);
+    }
+
+    public function testDatabase(Service $service)
+    {
+        $logs = [];
+        $startTime = microtime(true);
+        $log = function(string $msg) use (&$logs) {
+            $logs[] = '[' . date('H:i:s') . '] ' . $msg;
+        };
+
+        $dbName = $service->getDatabaseName();
+        $dbConfig = $service->getDatabaseConfig();
+        $dbHost = !empty($dbConfig['host']) ? $dbConfig['host'] : config('database.connections.mysql.host', '127.0.0.1');
+        $dbPort = !empty($dbConfig['port']) ? $dbConfig['port'] : config('database.connections.mysql.port', '3306');
+        $dbUser = !empty($dbConfig['username']) ? $dbConfig['username'] : config('database.connections.mysql.username', 'root');
+        $dbPass = $dbConfig['password'] ?? config('database.connections.mysql.password', '');
+
+        $log("🔌 تست اتصال به پایگاه‌داده: سرور {$dbHost}:{$dbPort} با کاربر '{$dbUser}' ...");
+
+        if (empty($dbName)) {
+            $log("⚠️ هشدار: نام دیتابیس در فایل .env یا تنظیمات سرویس یافت نشد.");
+            return response()->json([
+                'success' => false,
+                'message' => 'نام پایگاه‌داده مشخص نیست.',
+                'logs' => $logs,
+            ]);
+        }
+
+        $log("🗄️ نام پایگاه‌داده شناسایی‌شده: {$dbName}");
+
+        $tableCount = 0;
+        $sizeMb = 0;
+
+        // 1. PDO Connection Test
+        try {
+            $dsn = "mysql:host={$dbHost};port={$dbPort};dbname={$dbName};charset=utf8mb4";
+            $pdoStart = microtime(true);
+            $pdo = new \PDO($dsn, $dbUser, $dbPass, [
+                \PDO::ATTR_TIMEOUT => 5,
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            ]);
+            $pdoLatency = round((microtime(true) - $pdoStart) * 1000, 1);
+            $log("✅ اتصال مستقیم PDO به MySQL موفق بود (تاخیر: {$pdoLatency}ms).");
+
+            // Fetch server version
+            $version = $pdo->query('SELECT VERSION()')->fetchColumn();
+            $log("ℹ️ نسخه MySQL سرور: {$version}");
+
+            // Count tables & database size
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) as table_count, 
+                           ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) as size_mb 
+                    FROM information_schema.tables 
+                    WHERE table_schema = ?
+                ");
+                $stmt->execute([$dbName]);
+                $stats = $stmt->fetch(\PDO::FETCH_ASSOC);
+                $tableCount = $stats['table_count'] ?? 0;
+                $sizeMb = $stats['size_mb'] ?? 0;
+                $log("📊 آمار دیتابیس: {$tableCount} جدول | حجم تقریبی داده‌ها: {$sizeMb} MB");
+            } catch (\Throwable $ex) {
+                $log("ℹ️ امکان خواندن آمار information_schema وجود نداشت: " . $ex->getMessage());
+            }
+
+        } catch (\PDOException $e) {
+            $log("❌ خطا در اتصال PDO به دیتابیس: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'خطا در اتصال به پایگاه‌داده: ' . $e->getMessage(),
+                'logs' => $logs,
+            ]);
+        }
+
+        // 2. mysqldump Probe / Dry-run Test
+        $log("🧪 اجرای تست آزمایشی mysqldump (با فلگ‌های --single-transaction, --quick, --skip-lock-tables) ...");
+        $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
+        $cmd = "mysqldump --single-transaction --quick --skip-lock-tables --default-character-set=utf8mb4 -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} --no-data " . escapeshellarg($dbName);
+
+        $dumpStart = microtime(true);
+        $process = \Illuminate\Support\Facades\Process::timeout(15)->run($cmd);
+        $dumpLatency = round((microtime(true) - $dumpStart) * 1000, 1);
+
+        if (!$process->successful()) {
+            $errorOutput = trim($process->errorOutput());
+            $log("❌ خطا در اجرای mysqldump: {$errorOutput}");
+            return response()->json([
+                'success' => false,
+                'message' => 'دستور mysqldump با خطا متوقف شد: ' . $errorOutput,
+                'logs' => $logs,
+            ]);
+        }
+
+        $log("✅ تست خروجی mysqldump با موفقیت ساختار دیتابیس را خواند ({$dumpLatency}ms).");
+
+        $totalElapsed = round((microtime(true) - $startTime) * 1000, 1);
+        $log("🎉 تمام تست‌های دیتابیس با موفقیت پشت سر گذاشته شدند (کل زمان: {$totalElapsed}ms).");
+
+        return response()->json([
+            'success' => true,
+            'message' => "✅ پایگاه‌داده و ابزار mysqldump در سلامت کامل هستند ({$totalElapsed}ms).",
+            'logs' => $logs,
+            'table_count' => $tableCount,
+            'size_mb' => $sizeMb,
+        ]);
+    }
+
+    public function testCron(Service $service)
+    {
+        $logs = [];
+        $log = function(string $msg) use (&$logs) {
+            $logs[] = '[' . date('H:i:s') . '] ' . $msg;
+        };
+
+        $log("⏰ آغاز بررسی وضعیت کران‌جاب (Cron Service) و زمان‌بندی‌های سرور...");
+
+        // 1. Check Cron Service / Daemon
+        $isCronActive = false;
+        $cronDaemonMsg = '';
+        
+        $check1 = \Illuminate\Support\Facades\Process::run('systemctl is-active cron 2>/dev/null');
+        if (trim($check1->output()) === 'active') {
+            $isCronActive = true;
+            $cronDaemonMsg = 'سرویس cron در systemd فعال (active) است.';
+        } else {
+            $check2 = \Illuminate\Support\Facades\Process::run('systemctl is-active crond 2>/dev/null');
+            if (trim($check2->output()) === 'active') {
+                $isCronActive = true;
+                $cronDaemonMsg = 'سرویس crond در systemd فعال (active) است.';
+            } else {
+                $psCheck = \Illuminate\Support\Facades\Process::run("ps -eo comm | grep -E '^(cron|crond)$'");
+                if (!empty(trim($psCheck->output()))) {
+                    $isCronActive = true;
+                    $cronDaemonMsg = 'پروسه cron در پس‌زمینه سرور در حال اجراست.';
+                }
+            }
+        }
+
+        if ($isCronActive) {
+            $log("✅ وضعیت سرویس کران سرور: {$cronDaemonMsg}");
+        } else {
+            $log("⚠️ هشدار: به نظر می‌رسد سرویس cron روی سرور غیرفعال یا متوقف است. (دستور پیشنهادی: systemctl start cron)");
+        }
+
+        // 2. Check /etc/cron.d/server-panel file
+        $cronService = new CronJobService();
+        $cronConfig = $cronService->getConfig();
+        $cronFile = $cronConfig['cron_file'] ?? '/etc/cron.d/server-panel';
+
+        if (File::exists($cronFile)) {
+            $perms = substr(sprintf('%o', fileperms($cronFile)), -4);
+            $log("📁 فایل کران پنل: {$cronFile} (مجوز دسترسی: {$perms})");
+            if ($perms !== '0644' && $perms !== '644') {
+                $log("⚠️ توجه: استاندارد مجوزهای فایل‌های داخل /etc/cron.d برابر با 0644 است.");
+            }
+            $content = File::get($cronFile);
+            if (!str_ends_with($content, "\n")) {
+                $log("⚠️ توجه: فایل کران با خط جدید (Newline) خاتمه نیافته است که ممکن است باعث عدم اجرای خط آخر توسط crond شود.");
+            }
+        } else {
+            $log("📁 فایل اختصاصی {$cronFile} هنوز ایجاد نشده است (با ذخیره تنظیمات ساخته می‌شود).");
+        }
+
+        // 3. Search for scheduled jobs of this service
+        $jobs = $cronService->listJobs();
+        $serviceJobs = [];
+        foreach ($jobs as $j) {
+            if (str_contains($j['command'] ?? '', "backup:run-service {$service->id}") || str_contains($j['name'] ?? '', "backup_{$service->id}")) {
+                $serviceJobs[] = $j;
+            }
+        }
+
+        if (count($serviceJobs) > 0) {
+            $log("📋 تعداد " . count($serviceJobs) . " دستور زمان‌بندی‌شده برای سرویس {$service->name} در فایل کران ثبت شده است:");
+            foreach ($serviceJobs as $sj) {
+                $statusStr = ($sj['enabled'] ?? true) ? '🟢 فعال' : '🔴 غیرفعال';
+                $log("   • {$statusStr} [{$sj['schedule']}] کاربر: {$sj['run_as']} | نام: {$sj['name']}");
+            }
+        } else {
+            $log("ℹ️ در حال حاضر هیچ رکورد مستقیمی برای این سرویس در فایل کران ثبت نشده است (در صورت فعال بودن در تب تنظیمات، دکمه ذخیره را بزنید).");
+        }
+
+        // 4. Test Dry-Run Execution of the Backup Command
+        $log("🧪 اجرای تست خشک (Dry-Run Simulation) دستور بکاپ با آرتیسان...");
+        $artisanPath = base_path('artisan');
+        $dryRunCmd = "php {$artisanPath} backup:run-service {$service->id} --dry-run";
+        $p = \Illuminate\Support\Facades\Process::timeout(60)->run($dryRunCmd);
+        
+        if ($p->successful()) {
+            $log("✅ شبیه‌سازی اجرای دستور بکاپ با موفقیت انجام شد:");
+            $outLines = array_filter(explode("\n", trim($p->output())));
+            foreach (array_slice($outLines, 0, 8) as $ol) {
+                $log("   " . $ol);
+            }
+        } else {
+            $log("❌ خطایی در شبیه‌سازی اجرای دستور بکاپ رخ داد:");
+            $log("   " . ($p->errorOutput() ?: $p->output()));
+        }
+
+        $log("🏁 بررسی و تست کران‌جاب به پایان رسید.");
+
+        return response()->json([
+            'success' => $isCronActive && $p->successful(),
+            'message' => $isCronActive ? '✅ وضعیت کران و شبیه‌سازی تایید شد.' : '⚠️ سرویس کران غیرفعال است یا دستور با خطا مواجه شد.',
+            'logs' => $logs,
+            'is_cron_active' => $isCronActive,
+            'jobs_count' => count($serviceJobs),
+        ]);
+    }
     
     public function backupDatabaseNow(Service $service)
     {

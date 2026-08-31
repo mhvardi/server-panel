@@ -7,9 +7,105 @@
     activeTab: 'settings',
     submitting: false,
     loadingAction: null,
+    diagRunning: null,
+    diagLogs: [],
+    diagStatus: {
+        db: null,
+        ftp: null,
+        cron: null
+    },
     submitManual(target, type) {
         this.loadingAction = target + '_' + type;
         this.$refs['manual_form_' + target + '_' + type].submit();
+    },
+    runDbTest() {
+        this.diagRunning = 'db';
+        this.addDiagLog('🚀 آغاز تست سلامت پایگاه‌داده و اعتبارسنجی mysqldump...');
+        fetch('{{ route('backup_tasks.test_db', $service->id) }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            this.diagRunning = null;
+            this.diagStatus.db = data.success;
+            if(data.logs && data.logs.length) {
+                data.logs.forEach(l => this.addDiagLog(l));
+            }
+            if(!data.success) {
+                this.addDiagLog('❌ نتیجه: ' + data.message);
+            }
+        })
+        .catch(err => {
+            this.diagRunning = null;
+            this.diagStatus.db = false;
+            this.addDiagLog('❌ خطا در ارتباط با سرور جهت تست دیتابیس: ' + err.message);
+        });
+    },
+    runFtpTest() {
+        this.diagRunning = 'ftp';
+        this.addDiagLog('🚀 آغاز تست پیشرفته اتصال و بررسی دسترسی FTP...');
+        const host = document.getElementById('remote_host')?.value || '';
+        const user = document.getElementById('remote_user')?.value || '';
+        const pass = document.getElementById('remote_password')?.value || '';
+        const port = document.getElementById('remote_port')?.value || 21;
+        const path = document.getElementById('remote_path')?.value || '';
+
+        fetch('{{ route('backup_tasks.test_ftp_full', $service->id) }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+            body: JSON.stringify({ remote_host: host, remote_user: user, remote_password: pass, remote_port: port, remote_path: path })
+        })
+        .then(r => r.json())
+        .then(data => {
+            this.diagRunning = null;
+            this.diagStatus.ftp = data.success;
+            if(data.logs && data.logs.length) {
+                data.logs.forEach(l => this.addDiagLog(l));
+            }
+            if(!data.success) {
+                this.addDiagLog('❌ نتیجه: ' + data.message);
+            }
+        })
+        .catch(err => {
+            this.diagRunning = null;
+            this.diagStatus.ftp = false;
+            this.addDiagLog('❌ خطا در ارتباط با سرور جهت تست FTP: ' + err.message);
+        });
+    },
+    runCronTest() {
+        this.diagRunning = 'cron';
+        this.addDiagLog('🚀 آغاز بررسی وضعیت سرویس کران و شبیه‌سازی اجرا...');
+        fetch('{{ route('backup_tasks.test_cron', $service->id) }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            this.diagRunning = null;
+            this.diagStatus.cron = data.success;
+            if(data.logs && data.logs.length) {
+                data.logs.forEach(l => this.addDiagLog(l));
+            }
+            if(!data.success) {
+                this.addDiagLog('⚠️ نتیجه: ' + data.message);
+            }
+        })
+        .catch(err => {
+            this.diagRunning = null;
+            this.diagStatus.cron = false;
+            this.addDiagLog('❌ خطا در ارتباط با سرور جهت تست کران: ' + err.message);
+        });
+    },
+    addDiagLog(msg) {
+        this.diagLogs.push(msg);
+        this.$nextTick(() => {
+            const el = document.getElementById('diag-console');
+            if(el) el.scrollTop = el.scrollHeight;
+        });
+    },
+    clearDiagLogs() {
+        this.diagLogs = [];
     }
 }">
     <!-- Breadcrumb & Top Header -->
@@ -80,6 +176,13 @@
                 class="flex items-center gap-2 px-4 py-2 text-xs rounded-xl transition duration-150">
             <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             <span>عملیات بکاپ دستی</span>
+        </button>
+
+        <button type="button" @click="activeTab = 'diagnostics'" 
+                :class="activeTab === 'diagnostics' ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-white shadow-sm font-bold' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white font-medium'"
+                class="flex items-center gap-2 px-4 py-2 text-xs rounded-xl transition duration-150">
+            <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+            <span>🧪 تست اتصال و کران‌جاب</span>
         </button>
 
         <button type="button" @click="activeTab = 'status'" 
@@ -533,6 +636,157 @@
                         </div>
                     @endif
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2.5. DIAGNOSTICS & TESTING TAB -->
+    <div x-show="activeTab === 'diagnostics'" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0" style="display: none;">
+        <!-- Banner -->
+        <div class="p-4 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 dark:from-purple-950/30 dark:via-indigo-950/30 dark:to-blue-950/30 rounded-2xl border border-purple-200/70 dark:border-purple-800/60 text-xs text-purple-900 dark:text-purple-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm mb-6">
+            <div class="flex items-center gap-3">
+                <span class="text-xl">🧪</span>
+                <div>
+                    <span class="font-bold text-sm">سیستم تست جامع و عیب‌یابی اتصال‌ها و زمان‌بندی سرور:</span>
+                    <p class="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">بررسی وضعیت ارتباط MySQL، تست اختصاصی ابزار mysqldump، بررسی اتصال و دسترسی نوشتن FTP و اعتبارسنجی سرویس کران‌جاب سیستم.</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button type="button" @click="runDbTest(); runFtpTest(); runCronTest();" :disabled="diagRunning !== null" class="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-black text-xs shadow-md shadow-purple-600/20 transition flex items-center gap-2 whitespace-nowrap">
+                    <span x-show="diagRunning !== null" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full"></span>
+                    <span>⚡ تست همه‌جانبه (دیتابیس + FTP + کران)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 3 Action Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <!-- 1. DB Test Card -->
+            <div class="bg-white dark:bg-gray-800/90 rounded-3xl p-6 shadow-sm border border-gray-200/80 dark:border-gray-700/60 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-lg">
+                                🗄️
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-gray-900 dark:text-white">تست اتصال دیتابیس</h3>
+                                <p class="text-[11px] text-gray-500 dark:text-gray-400">MySQL & mysqldump</p>
+                            </div>
+                        </div>
+                        <template x-if="diagStatus.db === true">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✅ موفق</span>
+                        </template>
+                        <template x-if="diagStatus.db === false">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300">❌ دارای خطا</span>
+                        </template>
+                    </div>
+
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">بررسی اعتبار نام کاربری، پورت، اعتبارسنجی PDO و اجرای آزمایشی mysqldump با فلگ‌های بهینه‌سازی.</p>
+                </div>
+
+                <button type="button" @click="runDbTest()" :disabled="diagRunning !== null" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/60 rounded-xl border border-blue-200/70 dark:border-blue-800/60 font-bold text-xs transition">
+                    <span x-show="diagRunning === 'db'" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full"></span>
+                    <span>تست دیتابیس و mysqldump</span>
+                </button>
+            </div>
+
+            <!-- 2. FTP Test Card -->
+            <div class="bg-white dark:bg-gray-800/90 rounded-3xl p-6 shadow-sm border border-gray-200/80 dark:border-gray-700/60 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-lg">
+                                🌐
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-gray-900 dark:text-white">تست اتصال FTP ریموت</h3>
+                                <p class="text-[11px] text-gray-500 dark:text-gray-400">اتصال، Passive و Write Check</p>
+                            </div>
+                        </div>
+                        <template x-if="diagStatus.ftp === true">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✅ موفق</span>
+                        </template>
+                        <template x-if="diagStatus.ftp === false">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300">❌ دارای خطا</span>
+                        </template>
+                    </div>
+
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">بررسی هندشیک شبکه، لاگین، فعال‌سازی Passive Mode، دسترسی به پوشه اختصاصی دامنه و ایجاد/حذف فایل آزمایشی.</p>
+                </div>
+
+                <button type="button" @click="runFtpTest()" :disabled="diagRunning !== null" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/60 rounded-xl border border-indigo-200/70 dark:border-indigo-800/60 font-bold text-xs transition">
+                    <span x-show="diagRunning === 'ftp'" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full"></span>
+                    <span>تست پیشرفته اتصال FTP</span>
+                </button>
+            </div>
+
+            <!-- 3. Cron Test Card -->
+            <div class="bg-white dark:bg-gray-800/90 rounded-3xl p-6 shadow-sm border border-gray-200/80 dark:border-gray-700/60 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg">
+                                ⏰
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-gray-900 dark:text-white">تست سرویس کران‌جاب</h3>
+                                <p class="text-[11px] text-gray-500 dark:text-gray-400">Daemon & Dry-Run Simulation</p>
+                            </div>
+                        </div>
+                        <template x-if="diagStatus.cron === true">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✅ تایید شد</span>
+                        </template>
+                        <template x-if="diagStatus.cron === false">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300">⚠️ هشدار/خطا</span>
+                        </template>
+                    </div>
+
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">بررسی فعال بودن دیمون کران سرور، بررسی مجوز فایل <code>/etc/cron.d/server-panel</code> و شبیه‌سازی تست خشک (Dry-Run) دستور بکاپ.</p>
+                </div>
+
+                <button type="button" @click="runCronTest()" :disabled="diagRunning !== null" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/60 rounded-xl border border-amber-200/70 dark:border-amber-800/60 font-bold text-xs transition">
+                    <span x-show="diagRunning === 'cron'" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-amber-600 border-t-transparent rounded-full"></span>
+                    <span>بررسی سلامت کران و شبیه‌سازی</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Terminal Diagnostic Console -->
+        <div class="bg-gray-900 dark:bg-gray-950 rounded-3xl p-6 shadow-md border border-gray-800">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-4 mb-4">
+                <div class="flex items-center gap-2">
+                    <div class="flex gap-1.5">
+                        <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span>
+                        <span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span>
+                        <span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>
+                    </div>
+                    <span class="text-xs font-mono text-gray-400 mr-2">کنسول خروجی لاگ‌های زنده عیب‌یابی (Live Diagnostic Console)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" @click="clearDiagLogs()" class="text-xs text-gray-400 hover:text-white px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 transition">
+                        پاک‌سازی لاگ
+                    </button>
+                </div>
+            </div>
+
+            <div id="diag-console" class="font-mono text-xs max-h-96 overflow-y-auto space-y-1 text-gray-200 p-2 leading-relaxed" dir="ltr">
+                <template x-if="diagLogs.length === 0">
+                    <div class="text-gray-500 text-center py-8">
+                        روی دکمه‌های تست بالا کلیک کنید تا گزارش زنده مراحل اعتبارسنجی و عیب‌یابی در اینجا نمایش داده شود.
+                    </div>
+                </template>
+                <template x-for="(logLine, index) in diagLogs" :key="index">
+                    <div class="py-0.5" 
+                         :class="{
+                             'text-emerald-400': logLine.includes('✅') || logLine.includes('موفق'),
+                             'text-red-400 font-bold': logLine.includes('❌') || logLine.includes('خطا'),
+                             'text-amber-300': logLine.includes('⚠️') || logLine.includes('هشدار'),
+                             'text-indigo-300': logLine.includes('🚀') || logLine.includes('🔌') || logLine.includes('🌐'),
+                             'text-gray-300': !logLine.includes('✅') && !logLine.includes('❌') && !logLine.includes('⚠️')
+                         }" 
+                         x-text="logLine"></div>
+                </template>
             </div>
         </div>
     </div>
