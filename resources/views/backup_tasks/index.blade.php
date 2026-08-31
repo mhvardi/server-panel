@@ -3,8 +3,53 @@
 @section('title', 'مدیریت پشتیبان‌گیری هوشمند')
 
 @section('content')
-<div class="space-y-6">
-    <!-- Header with Stats -->
+<div class="space-y-6" x-data="{
+    selectedServices: [],
+    selectAll: false,
+    bulkType: 'db',
+    bulkTarget: 'ftp',
+    submittingBulk: false,
+    testingGlobal: false,
+    showGlobalDiag: false,
+    globalDiagLogs: [],
+    globalHealth: null,
+    
+    toggleSelectAll() {
+        if (this.selectAll) {
+            this.selectedServices = @json($services->pluck('id'));
+        } else {
+            this.selectedServices = [];
+        }
+    },
+    
+    checkSelectAllState() {
+        this.selectAll = this.selectedServices.length === {{ $services->count() }} && {{ $services->count() }} > 0;
+    },
+
+    testGlobal() {
+        this.testingGlobal = true;
+        this.showGlobalDiag = true;
+        this.globalDiagLogs = ['[' + (new Date()).toLocaleTimeString() + '] 🚀 آغاز تست جامع و سریع وضعیت کلی سیستم...'];
+        
+        fetch('{{ route('backup_tasks.test_global') }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            this.testingGlobal = false;
+            this.globalHealth = data;
+            if (data.logs && data.logs.length) {
+                this.globalDiagLogs = data.logs;
+            }
+        })
+        .catch(err => {
+            this.testingGlobal = false;
+            this.globalDiagLogs.push('❌ خطای ارتباط با سرور: ' + err.message);
+        });
+    }
+}">
+    <!-- Header with Stats & Global Actions -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
             <h1 class="text-2xl font-black text-gray-900 dark:text-white flex items-center gap-2.5">
@@ -13,14 +58,22 @@
                 </span>
                 مدیریت وظایف پشتیبان‌گیری
             </h1>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">سیستم پشتیبان‌گیری خودکار و هوشمند با تفکیک پایگاه‌داده و سورس پروژه (Local & Remote FTP)</p>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">سیستم پشتیبان‌گیری هوشمند با تفکیک پایگاه‌داده و سورس پروژه و پردازش امن در صف ترتیبی</p>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button type="button" @click="testGlobal()" :disabled="testingGlobal" class="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 dark:hover:bg-purple-900/60 font-bold text-xs rounded-2xl border border-purple-200/80 dark:border-purple-800/60 shadow-sm transition">
+                <span x-show="testingGlobal" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-purple-600 border-t-transparent rounded-full"></span>
+                <span x-show="!testingGlobal">🧪</span>
+                <span>تست سریع وضعیت کلی (دیتابیس، FTP، کران)</span>
+            </button>
         </div>
     </div>
 
     @if (session('success'))
         <div class="p-4 text-sm text-emerald-800 bg-emerald-50 rounded-2xl border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300 flex items-center justify-between shadow-sm">
             <div class="flex items-center gap-2">
-                <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
                 <span>{{ session('success') }}</span>
             </div>
         </div>
@@ -28,11 +81,37 @@
     @if (session('error'))
         <div class="p-4 text-sm text-red-800 bg-red-50 rounded-2xl border border-red-200 dark:bg-red-950/40 dark:border-red-800/60 dark:text-red-300 flex items-center justify-between shadow-sm">
             <div class="flex items-center gap-2">
-                <svg class="w-5 h-5 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                <svg class="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
                 <span>{{ session('error') }}</span>
             </div>
         </div>
     @endif
+
+    <!-- Global Diagnostic Console Drawer -->
+    <div x-show="showGlobalDiag" x-transition class="bg-gray-900 dark:bg-gray-950 rounded-3xl p-5 shadow-lg border border-gray-800 space-y-3" style="display: none;">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+            <div class="flex items-center gap-2.5">
+                <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
+                <h3 class="text-xs font-bold text-gray-200">گزارش زنده عیب‌یابی و سلامت کلی سرور (MySQL / FTP / Cron / Queue)</h3>
+            </div>
+            <button type="button" @click="showGlobalDiag = false" class="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded-lg">
+                بستن
+            </button>
+        </div>
+        <div class="font-mono text-xs max-h-60 overflow-y-auto space-y-1 text-gray-200 p-2" dir="ltr">
+            <template x-for="(line, idx) in globalDiagLogs" :key="idx">
+                <div class="py-0.5"
+                     :class="{
+                         'text-emerald-400': line.includes('✅') || line.includes('موفق'),
+                         'text-red-400 font-bold': line.includes('❌') || line.includes('خطا'),
+                         'text-amber-300': line.includes('⚠️') || line.includes('هشدار'),
+                         'text-indigo-300': line.includes('🚀') || line.includes('🔌'),
+                         'text-gray-300': !line.includes('✅') && !line.includes('❌') && !line.includes('⚠️')
+                     }"
+                     x-text="line"></div>
+            </template>
+        </div>
+    </div>
 
     <!-- Quick Overview Metric Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -68,14 +147,14 @@
 
         <div class="bg-white dark:bg-gray-800/90 rounded-2xl p-4 border border-gray-200/80 dark:border-gray-700/60 shadow-sm flex items-center justify-between">
             <div>
-                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">وضعیت صف پردازش</p>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">وضعیت صف ترتیبی (Queue)</p>
                 <div class="flex items-center gap-1.5 mt-1">
                     @if($queueCount > 0)
                         <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
-                        <p class="text-lg font-black text-amber-600 dark:text-amber-400">{{ $queueCount }} در نوبت</p>
+                        <p class="text-lg font-black text-amber-600 dark:text-amber-400">{{ $queueCount }} بکاپ در نوبت</p>
                     @else
                         <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                        <p class="text-base font-black text-emerald-600 dark:text-emerald-400">صف آزاد (آماده)</p>
+                        <p class="text-base font-black text-emerald-600 dark:text-emerald-400">صف آزاد (آماده پذیرش)</p>
                     @endif
                 </div>
             </div>
@@ -85,12 +164,86 @@
         </div>
     </div>
 
+    <!-- Sticky Bulk Actions Panel (When 1+ Selected) -->
+    <div x-show="selectedServices.length > 0" 
+         x-transition:enter="transition ease-out duration-200" 
+         x-transition:enter-start="opacity-0 -translate-y-2" 
+         x-transition:enter-end="opacity-100 translate-y-0" 
+         class="sticky top-4 z-20 bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 text-white rounded-3xl p-4 sm:p-5 shadow-xl border border-indigo-700/50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-lg">
+                ⚡
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-black text-white" x-text="selectedServices.length + ' سرویس انتخاب شد'"></span>
+                    <span class="text-[10px] bg-indigo-400/20 text-indigo-200 px-2 py-0.5 rounded-md">عملیات دسته‌جمعی</span>
+                </div>
+                <p class="text-xs text-indigo-200 mt-0.5">تمام درخواست‌ها در صف پس‌زمینه قرار می‌گیرند و یکی‌یکی و به نوبت بدون قطعی سرور اجرا می‌شوند.</p>
+            </div>
+        </div>
+
+        <form action="{{ route('backup_tasks.bulk') }}" method="POST" class="flex flex-wrap items-center gap-3 w-full md:w-auto" @submit="submittingBulk = true">
+            @csrf
+            <!-- Hidden Selected Service IDs -->
+            <template x-for="id in selectedServices" :key="id">
+                <input type="hidden" name="service_ids[]" :value="id">
+            </template>
+
+            <!-- Type Selector -->
+            <div class="flex items-center rounded-xl bg-black/20 p-1 border border-white/10 text-xs">
+                <label class="cursor-pointer px-3 py-1.5 rounded-lg transition" :class="bulkType === 'db' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-indigo-200 hover:text-white'">
+                    <input type="radio" name="type" value="db" x-model="bulkType" class="sr-only">
+                    🗄️ دیتابیس
+                </label>
+                <label class="cursor-pointer px-3 py-1.5 rounded-lg transition" :class="bulkType === 'files' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-indigo-200 hover:text-white'">
+                    <input type="radio" name="type" value="files" x-model="bulkType" class="sr-only">
+                    📁 سورس فایل‌ها
+                </label>
+                <label class="cursor-pointer px-3 py-1.5 rounded-lg transition" :class="bulkType === 'full' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-indigo-200 hover:text-white'">
+                    <input type="radio" name="type" value="full" x-model="bulkType" class="sr-only">
+                    📦 فول بکاپ کامل
+                </label>
+            </div>
+
+            <!-- Target Selector -->
+            <div class="flex items-center rounded-xl bg-black/20 p-1 border border-white/10 text-xs">
+                <label class="cursor-pointer px-3 py-1.5 rounded-lg transition" :class="bulkTarget === 'ftp' ? 'bg-purple-600 text-white font-black shadow-sm' : 'text-purple-200 hover:text-white'">
+                    <input type="radio" name="target" value="ftp" x-model="bulkTarget" class="sr-only">
+                    🌐 هاست FTP
+                </label>
+                <label class="cursor-pointer px-3 py-1.5 rounded-lg transition" :class="bulkTarget === 'local' ? 'bg-purple-600 text-white font-black shadow-sm' : 'text-purple-200 hover:text-white'">
+                    <input type="radio" name="target" value="local" x-model="bulkTarget" class="sr-only">
+                    💻 سرور Local
+                </label>
+            </div>
+
+            <!-- Submit Button -->
+            <button type="submit" :disabled="submittingBulk" class="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-500/30 transition duration-150 flex items-center gap-2">
+                <span x-show="submittingBulk" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full"></span>
+                <span>🚀 افزودن به صف بکاپ</span>
+            </button>
+
+            <!-- Deselect Button -->
+            <button type="button" @click="selectedServices = []; selectAll = false;" class="px-3 py-2.5 text-xs text-indigo-300 hover:text-white font-bold transition">
+                لغو انتخاب
+            </button>
+        </form>
+    </div>
+
     <!-- Main Table Card -->
     <div class="bg-white dark:bg-gray-800/90 rounded-3xl shadow-sm border border-gray-200/80 dark:border-gray-700/60 overflow-hidden">
         <div class="p-5 border-b border-gray-100 dark:border-gray-700/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
                 <h2 class="text-base font-bold text-gray-900 dark:text-white">لیست سرویس‌ها و وضعیت پشتیبان‌گیری</h2>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">تنظیمات و برنامه زمانی مجزای هر سایت را از ستون عملیات مدیریت کنید.</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">سرویس‌های مورد نظر را برای بکاپ دسته‌جمعی علامت بزنید، یا از ستون عملیات تنظیمات را باز کنید.</p>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button type="button" @click="selectAll = true; toggleSelectAll()" class="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline">
+                    انتخاب همه سرویس‌ها
+                </button>
             </div>
         </div>
 
@@ -98,6 +251,9 @@
             <table class="min-w-full divide-y divide-gray-100 dark:divide-gray-700/60">
                 <thead class="bg-gray-50/75 dark:bg-gray-900/40 text-xs font-semibold text-gray-500 dark:text-gray-400">
                     <tr>
+                        <th scope="col" class="py-3.5 px-4 text-center w-12">
+                            <input type="checkbox" x-model="selectAll" @change="toggleSelectAll()" class="rounded-lg border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:bg-gray-800 dark:border-gray-700">
+                        </th>
                         <th scope="col" class="py-3.5 px-6 text-right">سرویس و دامنه</th>
                         <th scope="col" class="py-3.5 px-4 text-center">نوع</th>
                         <th scope="col" class="py-3.5 px-4 text-right">وضعیت بکاپ خودکار</th>
@@ -108,7 +264,12 @@
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-gray-700/40 text-sm">
                     @forelse ($services as $service)
-                        <tr class="hover:bg-gray-50/80 dark:hover:bg-gray-750/50 transition-colors duration-150">
+                        <tr class="hover:bg-gray-50/80 dark:hover:bg-gray-750/50 transition-colors duration-150" :class="selectedServices.includes({{ $service->id }}) ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''">
+                            <!-- Checkbox -->
+                            <td class="py-4 px-4 text-center">
+                                <input type="checkbox" value="{{ $service->id }}" x-model="selectedServices" @change="checkSelectAllState()" class="rounded-lg border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:bg-gray-800 dark:border-gray-700">
+                            </td>
+
                             <!-- Service Name & Domain -->
                             <td class="py-4 px-6">
                                 <div class="flex items-center gap-3">
@@ -182,13 +343,13 @@
                             <td class="py-4 px-6 text-left">
                                 <a href="{{ route('backup_tasks.settings', $service->id) }}" class="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 rounded-xl transition duration-150 shadow-sm">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                    تنظیمات و اجرا
+                                    تنظیمات و تست
                                 </a>
                             </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="py-12 px-6 text-center">
+                            <td colspan="7" class="py-12 px-6 text-center">
                                 <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 flex items-center justify-center">
                                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
                                 </div>

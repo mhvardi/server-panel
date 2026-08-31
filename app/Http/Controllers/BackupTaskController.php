@@ -365,6 +365,125 @@ class BackupTaskController extends Controller
         return response()->json($result);
     }
 
+    public function bulkBackup(Request $request)
+    {
+        $request->validate([
+            'service_ids' => 'required|array|min:1',
+            'service_ids.*' => 'exists:services,id',
+            'type' => 'required|in:db,files,full',
+            'target' => 'required|in:local,ftp',
+        ]);
+
+        $serviceIds = $request->service_ids;
+        $type = $request->type;
+        $target = $request->target;
+
+        $typeLabels = ['db' => 'پایگاه‌داده', 'files' => 'فایل‌های سورس', 'full' => 'کامل (دیتابیس + فایل‌ها)'];
+        $targetLabels = ['local' => 'سرور محلی', 'ftp' => 'هاست FTP مرکزی'];
+
+        $count = 0;
+        foreach ($serviceIds as $id) {
+            $service = Service::find($id);
+            if ($service) {
+                RunServiceBackupJob::dispatch($service, $type, $target)->onQueue('backups');
+                $count++;
+            }
+        }
+
+        return back()->with('success', "تعداد {$count} درخواست بکاپ «{$typeLabels[$type]}» ({$targetLabels[$target]}) با موفقیت در صف پردازش ترتیبی قرار گرفتند و به نوبت یکی‌یکی اجرا خواهند شد.");
+    }
+
+    public function testGlobalHealth()
+    {
+        $logs = [];
+        $startTime = microtime(true);
+        $log = function(string $msg) use (&$logs) {
+            $logs[] = '[' . date('H:i:s') . '] ' . $msg;
+        };
+
+        $log("🚀 آغاز تست سلامت کلی سیستم پشتیبان‌گیری...");
+
+        // 1. MySQL & mysqldump Health
+        $dbOk = false;
+        try {
+            $dbHost = config('database.connections.mysql.host', '127.0.0.1');
+            $dbPort = config('database.connections.mysql.port', '3306');
+            $dbUser = config('database.connections.mysql.username', 'root');
+            $dbPass = config('database.connections.mysql.password', '');
+            
+            $pdo = new \PDO("mysql:host={$dbHost};port={$dbPort};charset=utf8mb4", $dbUser, $dbPass, [
+                \PDO::ATTR_TIMEOUT => 3,
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            ]);
+            $ver = $pdo->query('SELECT VERSION()')->fetchColumn();
+            $log("✅ اتصال پایگاه‌داده مرکزی (MySQL {$ver}) در وضعیت آماده‌به‌کار است.");
+            $dbOk = true;
+        } catch (\Throwable $e) {
+            $log("❌ خطا در اتصال به پایگاه‌داده مرکزی: " . $e->getMessage());
+        }
+
+        // 2. FTP Connection Health (test with central FTP from first active service or default credentials)
+        $ftpOk = false;
+        $activeServiceWithFtp = Service::all()->first(function($s) {
+            $st = $this->getBackupSettings($s);
+            return !empty($st['remote_enabled']) && !empty($st['remote_host']);
+        });
+
+        if ($activeServiceWithFtp) {
+            $st = $this->getBackupSettings($activeServiceWithFtp);
+            $ftpRes = FtpBackupDriver::testConnectionDetailed(
+                $st['remote_host'],
+                $st['remote_user'] ?? '',
+                $st['remote_password'] ?? '',
+                intval($st['remote_port'] ?? 21)
+            );
+            $ftpOk = $ftpRes['success'];
+            if ($ftpOk) {
+                $log("✅ اتصال به هاست FTP مرکزی ({$st['remote_host']}) برقرار و تایید شد ({$ftpRes['latency_ms']}ms).");
+            } else {
+                $log("❌ خطا در اتصال به هاست FTP مرکزی: " . $ftpRes['message']);
+            }
+        } else {
+            $log("ℹ️ هیچ هاست FTP فعالی در تنظیمات سرویس‌ها ذخیره نشده است.");
+        }
+
+        // 3. Cron Daemon Status
+        $cronOk = false;
+        $check = \Illuminate\Support\Facades\Process::run('systemctl is-active cron 2>/dev/null');
+        if (trim($check->output()) === 'active') {
+            $cronOk = true;
+            $log("✅ سرویس کران‌جاب سیستم (cron daemon) فعال و در حال اجراست.");
+        } else {
+            $psCheck = \Illuminate\Support\Facades\Process::run("ps -eo comm | grep -E '^(cron|crond)$'");
+            if (!empty(trim($psCheck->output()))) {
+                $cronOk = true;
+                $log("✅ پروسه کران در سیستم فعال است.");
+            } else {
+                $log("⚠️ سرویس کران در حال حاضر متوقف است.");
+            }
+        }
+
+        // 4. Queue Worker Status / Queue Count
+        $queueCount = 0;
+        try {
+            $queueCount = DB::table('jobs')->where('queue', 'backups')->count();
+            $log("📋 تعداد وظایف در صف ترتیبی (Queue): {$queueCount} مورد");
+        } catch (\Throwable $e) {}
+
+        $elapsed = round((microtime(true) - $startTime) * 1000, 1);
+        $log("🏁 پایان تست کلی سلامت سیستم ({$elapsed}ms).");
+
+        return response()->json([
+            'success' => $dbOk && $cronOk,
+            'db_ok' => $dbOk,
+            'ftp_ok' => $ftpOk,
+            'cron_ok' => $cronOk,
+            'queue_count' => $queueCount,
+            'logs' => $logs,
+            'latency_ms' => $elapsed,
+        ]);
+    }
+
     public function testFtpFull(Request $request, Service $service)
     {
         $settings = $this->getBackupSettings($service);
