@@ -427,16 +427,16 @@ class DatabaseController extends Controller
         $dbPass = $config['password'] ?? (env('MYSQL_ROOT_PASSWORD') ?: '');
 
         $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
-        $cmd = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
+        $cmd = "mysqldump --single-transaction --quick --skip-lock-tables --default-character-set=utf8mb4 -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
 
-        $process = Process::run($cmd);
+        $process = Process::timeout(1800)->run($cmd);
         if (!$process->successful() || !file_exists($filePath) || filesize($filePath) === 0) {
             // Try fallback with root credentials
             $rootUser = env('MYSQL_ROOT_USERNAME', 'root');
             $rootPass = env('MYSQL_ROOT_PASSWORD', '');
             $rootPassParam = ($rootPass !== '' && $rootPass !== null) ? '-p' . escapeshellarg($rootPass) : '';
-            $cmdFallback = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($rootUser) . " {$rootPassParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
-            $processFallback = Process::run($cmdFallback);
+            $cmdFallback = "mysqldump --single-transaction --quick --skip-lock-tables --default-character-set=utf8mb4 -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($rootUser) . " {$rootPassParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($filePath);
+            $processFallback = Process::timeout(1800)->run($cmdFallback);
 
             if (!$processFallback->successful() || !file_exists($filePath) || filesize($filePath) === 0) {
                 return back()->with('error', 'خطا در خروجی گرفتن از پایگاه‌داده: ' . ($process->errorOutput() ?: 'امکان ایجاد فایل بکاپ وجود نداشت'));

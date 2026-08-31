@@ -126,13 +126,14 @@ class RunServiceBackup extends Command
                             $sql = "-- Mock DB Backup for {$dbName}\n";
                             file_put_contents($dbFile, gzencode($sql));
                         } else {
-                            $dbHost = config('database.connections.mysql.host', '127.0.0.1');
-                            $dbPort = config('database.connections.mysql.port', '3306');
-                            $dbUser = config('database.connections.mysql.username', 'root');
-                            $dbPass = config('database.connections.mysql.password', '');
+                            $dbConfig = $service->getDatabaseConfig();
+                            $dbHost = !empty($dbConfig['host']) ? $dbConfig['host'] : config('database.connections.mysql.host', '127.0.0.1');
+                            $dbPort = !empty($dbConfig['port']) ? $dbConfig['port'] : config('database.connections.mysql.port', '3306');
+                            $dbUser = !empty($dbConfig['username']) ? $dbConfig['username'] : config('database.connections.mysql.username', 'root');
+                            $dbPass = $dbConfig['password'] ?? config('database.connections.mysql.password', '');
                             $passParam = ($dbPass !== '' && $dbPass !== null) ? '-p' . escapeshellarg($dbPass) : '';
-                            $cmd = "mysqldump -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($dbFile);
-                            $process = \Illuminate\Support\Facades\Process::run($cmd);
+                            $cmd = "mysqldump --single-transaction --quick --skip-lock-tables --default-character-set=utf8mb4 -h " . escapeshellarg($dbHost) . " -P " . escapeshellarg((string)$dbPort) . " -u " . escapeshellarg($dbUser) . " {$passParam} " . escapeshellarg($dbName) . " | gzip > " . escapeshellarg($dbFile);
+                            $process = \Illuminate\Support\Facades\Process::timeout(1800)->run($cmd);
                             if (!$process->successful()) {
                                 throw new \Exception('خطا در mysqldump: ' . $process->errorOutput());
                             }
