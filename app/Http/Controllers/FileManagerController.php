@@ -245,6 +245,22 @@ class FileManagerController extends Controller
         }
 
         $uploadedFile = $request->file('file');
+
+        // Security Scanner Check
+        $scanner = app(\App\Services\FileScanner::class);
+        $scanResult = $scanner->scanUploadedFile($uploadedFile);
+        if (!$scanResult['safe']) {
+            \App\Models\SecurityEvent::log(
+                'file_scan',
+                'critical',
+                'تلاش برای آپلود فایل مخرب در فایل منیجر مسدود شد: ' . $uploadedFile->getClientOriginalName(),
+                $scanResult['reason'],
+                ['target_dir' => $safePath],
+                $request->ip()
+            );
+            return response()->json(['ok' => false, 'message' => 'خطای امنیتی: ' . $scanResult['reason']], 403);
+        }
+
         $filename     = $uploadedFile->getClientOriginalName();
 
         // پاک‌سازی نام فایل

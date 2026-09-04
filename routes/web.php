@@ -18,6 +18,9 @@ use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\FileManagerController;
 use App\Http\Controllers\DiskCleanupController;
 use App\Http\Controllers\DomainCenterController;
+use App\Http\Controllers\SecurityController;
+use App\Http\Middleware\IranIpRestriction;
+use App\Http\Middleware\LoginRateLimiter;
 
 
 // Installation Routes
@@ -36,9 +39,11 @@ Route::get('/', function () {
     return view('welcome');
 })->name('home');
 
-// Authentication Routes
-Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
-Route::post('/login', [AuthController::class, 'login']);
+// Authentication Routes (Protected by Iran IP Restriction and Rate Limiting)
+Route::middleware([IranIpRestriction::class])->group(function () {
+    Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [AuthController::class, 'login'])->middleware([LoginRateLimiter::class]);
+});
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
 // 2FA Verification Routes
@@ -190,3 +195,15 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('domain-center')
     Route::get('/ns-settings',              [DomainCenterController::class, 'nsSettings'])->name('ns-settings');
     Route::post('/check-dns',               [DomainCenterController::class, 'checkDns'])->name('check-dns');
 });
+
+// Security Center Routes
+Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('security')->name('security.')->group(function () {
+    Route::get('/',                     [SecurityController::class, 'index'])->name('index');
+    Route::post('/settings',            [SecurityController::class, 'updateSettings'])->name('settings.update');
+    Route::post('/scan',                [SecurityController::class, 'runFileScan'])->name('scan');
+    Route::post('/quarantine/{id}/restore', [SecurityController::class, 'restoreQuarantine'])->name('quarantine.restore');
+    Route::delete('/quarantine/{id}',   [SecurityController::class, 'deleteQuarantine'])->name('quarantine.delete');
+    Route::post('/clear-events',        [SecurityController::class, 'clearEvents'])->name('clear-events');
+    Route::post('/clear-attempts',      [SecurityController::class, 'clearLoginAttempts'])->name('clear-attempts');
+});
+

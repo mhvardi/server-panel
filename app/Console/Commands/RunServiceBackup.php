@@ -11,7 +11,7 @@ use Symfony\Component\Process\Process;
 
 class RunServiceBackup extends Command
 {
-    protected $signature = 'backup:run-service {service_id} {--type=all} {--dry-run} {--ftp-only}';
+    protected $signature = 'backup:run-service {service_id} {--type=all} {--dry-run} {--ftp-only} {--queue}';
     protected $description = 'Run an automated backup for a specific service (type: all, db, files).';
 
     private array $runLogs = [];
@@ -24,6 +24,18 @@ class RunServiceBackup extends Command
         if (!$service) {
             $this->error("Service with ID {$serviceId} not found.");
             return 1;
+        }
+
+        $type = $this->option('type') ?: 'all';
+        if ($type === 'full') {
+            $type = 'all';
+        }
+
+        // If queue option is passed, dispatch to sequential background queue
+        if ($this->option('queue')) {
+            \App\Jobs\RunServiceBackupJob::dispatch($service, $type)->onQueue('backups');
+            $this->info("Backup for service {$service->name} ({$type}) queued successfully.");
+            return 0;
         }
 
         $isMock = env('BACKUP_MOCK_ENABLED', false);

@@ -741,9 +741,9 @@ class BackupTaskController extends Controller
     private function updateCronJobs(Service $service, array $settings)
     {
         try {
-            // 1. Database Backup Cron (Dispatches via queue or artisan)
+            // 1. Database Backup Cron (Dispatches sequentially to queue)
             $dbCronName = 'backup-service-' . $service->id . '-db';
-            $dbCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=db";
+            $dbCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=db --queue";
             $existingDbJob = $this->cron->findJobByName($dbCronName);
 
             if (!empty($settings['db_enabled']) && !empty($settings['db_cron_expression'])) {
@@ -756,9 +756,9 @@ class BackupTaskController extends Controller
                 $this->cron->delete($existingDbJob['id']);
             }
 
-            // 2. Files Backup Cron
+            // 2. Files Backup Cron (Dispatches sequentially to queue)
             $filesCronName = 'backup-service-' . $service->id . '-files';
-            $filesCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=files";
+            $filesCommand = "php " . base_path('artisan') . " backup:run-service " . $service->id . " --type=files --queue";
             $existingFilesJob = $this->cron->findJobByName($filesCronName);
 
             if (!empty($settings['files_enabled']) && !empty($settings['files_cron_expression'])) {

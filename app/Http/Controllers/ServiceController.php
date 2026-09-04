@@ -965,6 +965,25 @@ class ServiceController extends Controller
             $file->move($destinationPath, 'upload_temp.zip');
             $zip = new ZipArchive;
             if ($zip->open($zipPath) === true) {
+                // Zip Slip Path Traversal Protection
+                $realDest = realpath($destinationPath) ?: $destinationPath;
+                for ($i = 0; $i < $zip->numFiles; $i++) {
+                    $entryName = $zip->getNameIndex($i);
+                    if (str_contains($entryName, '..') || str_starts_with($entryName, '/') || str_starts_with($entryName, '\\')) {
+                        $zip->close();
+                        File::delete($zipPath);
+                        \App\Models\SecurityEvent::log(
+                            'file_scan',
+                            'critical',
+                            'حمله Zip Slip Path Traversal مسدود شد: ' . $file->getClientOriginalName(),
+                            "فایل درون آرشیو قصد نفوذ به خارج از پوشه سرویس را داشت: {$entryName}",
+                            ['service_id' => $service->id],
+                            $request->ip()
+                        );
+                        return back()->withErrors(['error' => 'خطای امنیتی: فایل زیپ حاوی مسیرهای نامعتبر است (Zip Slip).']);
+                    }
+                }
+
                 $zip->extractTo($destinationPath);
                 $zip->close();
                 File::delete($zipPath);
@@ -999,6 +1018,22 @@ class ServiceController extends Controller
         $request->validate(['upload_file' => 'required|file', 'upload_path' => 'nullable|string']);
         try {
             $file = $request->file('upload_file');
+
+            // Security check
+            $scanner = app(\App\Services\FileScanner::class);
+            $scanResult = $scanner->scanUploadedFile($file, true);
+            if (!$scanResult['safe']) {
+                \App\Models\SecurityEvent::log(
+                    'file_scan',
+                    'critical',
+                    'آپلود فایل مخرب در سرویس مسدود شد: ' . $file->getClientOriginalName(),
+                    $scanResult['reason'],
+                    ['service_id' => $service->id, 'service_name' => $service->name],
+                    $request->ip()
+                );
+                return back()->withErrors(['error' => 'خطای امنیتی: ' . $scanResult['reason']]);
+            }
+
             $relativePath = $request->input('upload_path', '');
             if (strpos($relativePath, '..') !== false || str_starts_with($relativePath, '/')) {
                 return back()->withErrors(['error' => 'Invalid upload path.']);

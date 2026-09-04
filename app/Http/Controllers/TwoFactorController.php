@@ -23,17 +23,34 @@ class TwoFactorController extends Controller
             'code' => 'required',
         ]);
 
+        $throttleKey = '2fa_throttle:' . Auth::id();
+        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = \Illuminate\Support\Facades\RateLimiter::availableIn($throttleKey);
+            \App\Models\SecurityEvent::log(
+                'login',
+                'critical',
+                'تلاش بیش از حد برای حدس کد دو مرحله‌ای (2FA Brute Force)',
+                "کاربر: " . Auth::user()->email . " | زمان انتظار: {$seconds} ثانیه",
+                ['user_id' => Auth::id()],
+                $request->ip()
+            );
+            return back()->withErrors(['code' => "تعداد تلاش‌های کد تایید بیش از حد مجاز است. لطفاً {$seconds} ثانیه صبر کنید."]);
+        }
+
         $google2fa = new Google2FA();
         $user = Auth::user();
 
         $valid = $google2fa->verifyKey($user->two_factor_secret, $request->code);
 
         if ($valid) {
+            \Illuminate\Support\Facades\RateLimiter::clear($throttleKey);
             $request->session()->put('2fa_verified', true);
             return redirect()->intended('dashboard');
         }
 
-        return back()->withErrors(['code' => 'Invalid authentication code.']);
+        \Illuminate\Support\Facades\RateLimiter::hit($throttleKey, 300); // 5 mins lockout on 5 fails
+
+        return back()->withErrors(['code' => 'کد تایید دو مرحله‌ای وارد شده صحیح نمی‌باشد.']);
     }
 
     public function showSetupForm()

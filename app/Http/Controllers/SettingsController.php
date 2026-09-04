@@ -104,6 +104,12 @@ class SettingsController extends Controller
         }
         $output .= "\nMigrations completed.\n" . $migrateProcess->getOutput();
 
+        // Run Security Seeder to configure defaults and set up crons automatically
+        $seederProcess = new Process(['php', 'artisan', 'db:seed', '--class=Database\\Seeders\\SecuritySeeder', '--force']);
+        $seederProcess->setWorkingDirectory($basePath);
+        $seederProcess->run();
+        $output .= "\nSecurity configuration updated.\n";
+
         $cacheProcess = new Process(['php', 'artisan', 'optimize:clear']);
         $cacheProcess->setWorkingDirectory($basePath);
         $cacheProcess->run();
