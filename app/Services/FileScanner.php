@@ -95,7 +95,33 @@ class FileScanner
             return ['safe' => true];
         }
 
+        // 1. Exclude Quarantine, .git, .idea, vendor, node_modules, and panel core security files
+        $normalizedPath = str_replace('\\', '/', $filePath);
+
+        $excludedPaths = [
+            '/storage/app/quarantine',
+            '/.idea',
+            '/.git',
+            '/node_modules',
+            '/vendor',
+            '/app/Services/FileScanner.php',
+            '/app/Services/ServerAuditService.php',
+            '/app/Http/Middleware/SecurityHeaders.php',
+        ];
+
+        foreach ($excludedPaths as $excluded) {
+            if (str_contains($normalizedPath, $excluded)) {
+                return ['safe' => true];
+            }
+        }
+
+        // 2. Exclude safe data formats: xml, json, md, txt, svg, css, png, jpg, webp, gif
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+        $safeExtensions = ['xml', 'json', 'md', 'txt', 'svg', 'css', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'ico', 'woff', 'woff2', 'ttf'];
+        if (in_array($ext, $safeExtensions, true)) {
+            return ['safe' => true];
+        }
+
         $content = @file_get_contents($filePath, false, null, 0, 1024 * 1024); // max 1MB
         if ($content === false) {
             return ['safe' => true];
