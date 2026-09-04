@@ -3,7 +3,7 @@
 @section('title', 'مرکز جامع امنیت سرور')
 
 @section('content')
-<div class="space-y-8" x-data="{ activeTab: 'overview' }">
+<div class="space-y-8" x-data="{ activeTab: '{{ request()->has('logins_page') ? 'logins' : (request()->has('events_page') ? 'events' : 'overview') }}' }">
 
     <!-- Top Header Banner -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/20 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
@@ -448,6 +448,17 @@
                 </tbody>
             </table>
         </div>
+
+        @if($recentLogins->hasPages())
+            <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+                <div class="text-xs text-slate-400">
+                    نمایش {{ $recentLogins->firstItem() }} تا {{ $recentLogins->lastItem() }} از {{ $recentLogins->total() }} مورد
+                </div>
+                <div>
+                    {{ $recentLogins->links() }}
+                </div>
+            </div>
+        @endif
     </div>
 
     <!-- TAB 5: SECURITY EVENTS -->
@@ -487,6 +498,17 @@
                 </div>
             @endforelse
         </div>
+
+        @if($recentEvents->hasPages())
+            <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+                <div class="text-xs text-slate-400">
+                    نمایش {{ $recentEvents->firstItem() }} تا {{ $recentEvents->lastItem() }} از {{ $recentEvents->total() }} مورد
+                </div>
+                <div>
+                    {{ $recentEvents->links() }}
+                </div>
+            </div>
+        @endif
     </div>
 
 </div>

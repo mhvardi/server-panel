@@ -38,9 +38,9 @@ class SecurityController extends Controller
         ];
 
         $serverAudit = $this->audit->getAuditSummary();
-        $recentEvents = SecurityEvent::latest()->take(20)->get();
-        $recentLogins = LoginAttempt::latest()->take(15)->get();
-        $quarantinedFiles = FileQuarantine::latest()->take(15)->get();
+        $recentEvents = SecurityEvent::latest()->paginate(15, ['*'], 'events_page')->withQueryString();
+        $recentLogins = LoginAttempt::latest()->paginate(15, ['*'], 'logins_page')->withQueryString();
+        $quarantinedFiles = FileQuarantine::latest()->take(20)->get();
 
         $stats = [
             'total_blocked_logins' => LoginAttempt::where('success', false)->count(),
