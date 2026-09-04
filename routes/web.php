@@ -201,6 +201,8 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->prefix('security')->nam
     Route::get('/',                     [SecurityController::class, 'index'])->name('index');
     Route::post('/settings',            [SecurityController::class, 'updateSettings'])->name('settings.update');
     Route::post('/scan',                [SecurityController::class, 'runFileScan'])->name('scan');
+    Route::post('/quarantine/restore-all', [SecurityController::class, 'restoreAllQuarantine'])->name('quarantine.restore-all');
+    Route::post('/quarantine/bulk-action', [SecurityController::class, 'bulkQuarantineAction'])->name('quarantine.bulk-action');
     Route::post('/quarantine/{id}/restore', [SecurityController::class, 'restoreQuarantine'])->name('quarantine.restore');
     Route::delete('/quarantine/{id}',   [SecurityController::class, 'deleteQuarantine'])->name('quarantine.delete');
     Route::post('/clear-events',        [SecurityController::class, 'clearEvents'])->name('clear-events');

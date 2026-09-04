@@ -339,18 +339,70 @@
     </div>
 
     <!-- TAB 3: QUARANTINE -->
-    <div x-show="activeTab === 'quarantine'" class="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-700/60 shadow-sm">
-        <div class="flex items-center justify-between mb-6">
+    <div x-show="activeTab === 'quarantine'" x-data="{ selectedFiles: [], selectAll: false, toggleAll() { this.selectAll = !this.selectAll; if (this.selectAll) { this.selectedFiles = {{ json_encode($quarantinedFiles->pluck('id')) }}; } else { this.selectedFiles = []; } } }" class="bg-white dark:bg-slate-800 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-700/60 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
                 <h3 class="text-lg font-black text-slate-800 dark:text-slate-100">فایل‌های قرنطینه‌شده سرور</h3>
                 <p class="text-slate-400 text-xs mt-0.5">فایل‌هایی که دارای الگوهای وب‌شل یا پسوند مخرب بوده و از دسترس خارج شده‌اند</p>
             </div>
+            
+            @if($quarantinedFiles->count() > 0)
+                <div class="flex items-center gap-3">
+                    <form action="{{ route('security.quarantine.restore-all') }}" method="POST">
+                        @csrf
+                        <button type="submit" onclick="return confirm('آیا مطمئن هستید که می‌خواهید تمامی فایل‌های قرنطینه را به محل اصلی‌شان بازگردانید؟');" class="px-4 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span>بازگردانی همه فایل‌ها</span>
+                        </button>
+                    </form>
+                </div>
+            @endif
         </div>
+
+        @if($quarantinedFiles->count() > 0)
+            <!-- Bulk Actions Bar -->
+            <div x-show="selectedFiles.length > 0" x-cloak class="mb-4 p-3.5 rounded-2xl bg-indigo-50 dark:bg-slate-900/80 border border-indigo-200 dark:border-slate-700 flex items-center justify-between transition-all">
+                <div class="text-xs text-slate-700 dark:text-slate-300 font-bold flex items-center gap-2">
+                    <span class="w-5 h-5 rounded-full bg-indigo-600 text-white inline-flex items-center justify-center text-[10px]" x-text="selectedFiles.length"></span>
+                    <span>فایل انتخاب شده است</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <form action="{{ route('security.quarantine.bulk-action') }}" method="POST" class="inline">
+                        @csrf
+                        <template x-for="id in selectedFiles" :key="id">
+                            <input type="hidden" name="ids[]" :value="id">
+                        </template>
+                        <input type="hidden" name="action" value="restore">
+                        <button type="submit" onclick="return confirm('آیا از بازگردانی فایل‌های انتخاب شده اطمینان دارید؟');" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span>بازگردانی موارد انتخابی</span>
+                        </button>
+                    </form>
+
+                    <form action="{{ route('security.quarantine.bulk-action') }}" method="POST" class="inline">
+                        @csrf
+                        <template x-for="id in selectedFiles" :key="id">
+                            <input type="hidden" name="ids[]" :value="id">
+                        </template>
+                        <input type="hidden" name="action" value="delete">
+                        <button type="submit" onclick="return confirm('آیا از حذف دائم فایل‌های انتخاب شده اطمینان دارید؟');" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            <span>حذف دائم موارد انتخابی</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        @endif
 
         <div class="overflow-x-auto">
             <table class="w-full text-right text-xs">
                 <thead class="text-slate-400 border-b border-slate-100 dark:border-slate-700/60">
                     <tr>
+                        <th class="pb-3 pr-2 w-8">
+                            <input type="checkbox" @click="toggleAll()" :checked="selectAll" class="w-4 h-4 rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-0">
+                        </th>
                         <th class="pb-3">نام فایل</th>
                         <th class="pb-3">مسیر اصلی</th>
                         <th class="pb-3">علت قرنطینه</th>
@@ -361,7 +413,10 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 dark:divide-slate-700/40">
                     @forelse($quarantinedFiles as $file)
-                        <tr>
+                        <tr :class="selectedFiles.includes({{ $file->id }}) ? 'bg-indigo-500/5' : ''">
+                            <td class="py-3 pr-2">
+                                <input type="checkbox" :value="{{ $file->id }}" x-model.number="selectedFiles" class="w-4 h-4 rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-0">
+                            </td>
                             <td class="py-3 font-mono font-bold text-rose-500">{{ $file->filename }}</td>
                             <td class="py-3 font-mono text-slate-400 text-[11px]">{{ $file->original_path }}</td>
                             <td class="py-3 text-slate-700 dark:text-slate-300">{{ $file->reason }}</td>
@@ -387,7 +442,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="py-8 text-center text-slate-400">
+                            <td colspan="7" class="py-8 text-center text-slate-400">
                                 هیچ فایل مشکوکی در قرنطینه موجود نیست.
                             </td>
                         </tr>

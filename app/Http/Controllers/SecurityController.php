@@ -107,6 +107,9 @@ class SecurityController extends Controller
     /**
      * Restore file from quarantine
      */
+    /**
+     * Restore file from quarantine
+     */
     public function restoreQuarantine(int $id)
     {
         $item = FileQuarantine::findOrFail($id);
@@ -120,6 +123,71 @@ class SecurityController extends Controller
         SecurityEvent::log('file_scan', 'warning', "فایل {$item->filename} از قرنطینه بازگردانی شد.");
 
         return back()->with('success', "فایل {$item->filename} با موفقیت به مسیر اصلی بازگردانده شد.");
+    }
+
+    /**
+     * Restore all files from quarantine at once
+     */
+    public function restoreAllQuarantine()
+    {
+        $items = FileQuarantine::all();
+        $count = 0;
+
+        foreach ($items as $item) {
+            if (file_exists($item->quarantine_path)) {
+                $dir = dirname($item->original_path);
+                File::ensureDirectoryExists($dir);
+                rename($item->quarantine_path, $item->original_path);
+            }
+            $item->delete();
+            $count++;
+        }
+
+        if ($count > 0) {
+            SecurityEvent::log('file_scan', 'info', "تمامی فایل‌های قرنطینه ({$count} مورد) بازگردانی شدند.");
+            return back()->with('success', "تمامی {$count} فایل با موفقیت از قرنطینه به مسیرهای اصلی خود بازگردانده شدند.");
+        }
+
+        return back()->with('info', 'هیچ فایلی برای بازگردانی وجود ندارد.');
+    }
+
+    /**
+     * Handle bulk actions (restore selected / delete selected)
+     */
+    public function bulkQuarantineAction(Request $request)
+    {
+        $request->validate([
+            'action' => 'required|in:restore,delete',
+            'ids'    => 'required|array',
+            'ids.*'  => 'integer|exists:file_quarantines,id',
+        ]);
+
+        $ids = $request->input('ids', []);
+        $action = $request->input('action');
+        $items = FileQuarantine::whereIn('id', $ids)->get();
+        $count = 0;
+
+        foreach ($items as $item) {
+            if ($action === 'restore') {
+                if (file_exists($item->quarantine_path)) {
+                    $dir = dirname($item->original_path);
+                    File::ensureDirectoryExists($dir);
+                    rename($item->quarantine_path, $item->original_path);
+                }
+                $item->delete();
+            } elseif ($action === 'delete') {
+                if (file_exists($item->quarantine_path)) {
+                    @unlink($item->quarantine_path);
+                }
+                $item->delete();
+            }
+            $count++;
+        }
+
+        $verb = $action === 'restore' ? 'بازگردانی' : 'حذف دائم';
+        SecurityEvent::log('file_scan', 'info', "عملیات گروهی قرنطینه: {$count} فایل {$verb} شدند.");
+
+        return back()->with('success', "تعداد {$count} فایل با موفقیت {$verb} شدند.");
     }
 
     /**
