@@ -70,10 +70,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const setWidth = (id, percent) => {
+    const setGauge = (id, percent, normalColorClass) => {
         const el = document.getElementById(id);
-        if (el && percent !== undefined && percent !== null) {
-            el.style.width = percent + '%';
+        if (!el || percent === undefined || percent === null) return;
+        el.style.width = Math.min(100, Math.max(0, percent)) + '%';
+        
+        // Dynamic threshold colors
+        el.classList.remove('bg-blue-500', 'bg-emerald-500', 'bg-indigo-500', 'bg-amber-500', 'bg-rose-500');
+        if (percent >= 85) {
+            el.classList.add('bg-rose-500');
+        } else if (percent >= 75) {
+            el.classList.add('bg-amber-500');
+        } else {
+            el.classList.add(normalColorClass);
         }
     };
 
@@ -88,16 +97,20 @@ document.addEventListener('DOMContentLoaded', () => {
         setText('uptime_value', data.uptime);
         setText('uptime_summary', data.uptime);
 
-        // Update progress bars
-        setWidth('cpu_usage_bar', data.cpu_usage);
-        setWidth('memory_usage_bar', data.memory_usage);
-        setWidth('disk_usage_bar', data.disk_usage);
+        // Update progress bars with dynamic thresholds
+        setGauge('cpu_usage_bar', data.cpu_usage, 'bg-blue-500');
+        setGauge('memory_usage_bar', data.memory_usage, 'bg-emerald-500');
+        setGauge('disk_usage_bar', data.disk_usage, 'bg-indigo-500');
 
         // Update detailed usage text
         setText('memory_used_gb', data.memory_used_gb ?? 0);
         setText('memory_total_gb', data.memory_total_gb ?? 0);
         setText('disk_used_gb', data.disk_used_gb ?? 0);
         setText('disk_total_gb', data.disk_total_gb ?? 0);
+
+        if (Array.isArray(data.load_avg) && data.load_avg.length >= 3) {
+            setText('load_avg_value', data.load_avg.join(' / '));
+        }
 
         // Update resource chart
         if (data.metrics_history && resourceChart) {
@@ -128,17 +141,25 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         isFetching = true;
+        const refreshBtn = document.getElementById('manual_refresh_btn');
+        if (refreshBtn) refreshBtn.classList.add('animate-spin');
+
         try {
             await updateStats();
             scheduleNextPoll(5000);
         } catch (error) {
             console.error('Failed to update stats:', error);
-            // On error back off to 15s to reduce server strain
             scheduleNextPoll(15000);
         } finally {
             isFetching = false;
+            if (refreshBtn) {
+                setTimeout(() => refreshBtn.classList.remove('animate-spin'), 600);
+            }
         }
     };
+
+    // Expose for manual click trigger
+    window.refreshServerStats = runPoll;
 
     if (updateUrl) {
         runPoll();

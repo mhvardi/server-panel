@@ -80,6 +80,8 @@ class ServerStatsService
             'active_services'  => $activeServices,
             'load_avg'         => $this->getLoadAverage(),
             'hostname'         => gethostname() ?: 'Unknown',
+            'server_ip'        => $this->getServerIp(),
+            'os_name'          => php_uname('s'),
             'kernel_version'   => php_uname('r'),
             'last_reboot'      => $this->getLastReboot(),
             'alerts'           => $alerts,
@@ -91,13 +93,32 @@ class ServerStatsService
             'login_history'    => $this->getLoginHistory(5),
             'backup_status'    => $this->getBackupStatus(),
             'last_updated_at'  => now()->format('Y-m-d H:i:s'),
-            'memory_used_gb'  => $memStats['used_gb'],
-            'memory_total_gb' => $memStats['total_gb'],
-
-            'disk_used_gb'    => $diskStats['used_gb'],
-            'disk_total_gb'   => $diskStats['total_gb'],
-
+            'memory_used_gb'   => $memStats['used_gb'],
+            'memory_total_gb'  => $memStats['total_gb'],
+            'disk_used_gb'     => $diskStats['used_gb'],
+            'disk_total_gb'    => $diskStats['total_gb'],
         ];
+    }
+
+    /**
+     * Resolves the server local or public IP address with 24-hour cache.
+     */
+    public function getServerIp(): string
+    {
+        return Cache::remember('server_detected_ip', 86400, function () {
+            $ip = request()->server('SERVER_ADDR');
+            if ($ip && filter_var($ip, FILTER_VALIDATE_IP)) {
+                return $ip;
+            }
+            $host = gethostname();
+            if ($host) {
+                $resolved = @gethostbyname($host);
+                if ($resolved && filter_var($resolved, FILTER_VALIDATE_IP)) {
+                    return $resolved;
+                }
+            }
+            return '127.0.0.1';
+        });
     }
 
     /**

@@ -25,6 +25,8 @@ class ServerStatsServiceTest extends TestCase
             'active_services',
             'load_avg',
             'hostname',
+            'server_ip',
+            'os_name',
             'kernel_version',
             'last_reboot',
             'alerts',
