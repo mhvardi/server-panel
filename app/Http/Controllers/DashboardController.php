@@ -37,7 +37,7 @@ class DashboardController extends Controller
         // If the client explicitly requests JSON (e.g. for live updates)
         if ($request->query('json') === '1' || $request->wantsJson()) {
             $stats = $this->serverStats->getOverview('/');
-            return response()->json($stats);
+            return response()->json($stats)->header('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
 
         // Render the full dashboard page

@@ -113,29 +113,83 @@ class ServerStatsService
     }
 
     /**
-     * Calculates CPU usage over a short interval.
+     * Calculates CPU usage percent without blocking (zero sleep).
+     * Uses delta calculation between current /proc/stat and previously cached sample.
      */
     public function getCpuUsagePercent(): int
     {
-        $a = $this->readCpuStat();
-        usleep(200_000); // sample delay of 200ms
-        $b = $this->readCpuStat();
-        if (!$a || !$b) {
+        $curr = $this->readCpuStat();
+        if (!$curr) {
+            $load = function_exists('sys_getloadavg') ? sys_getloadavg() : null;
+            if ($load && isset($load[0])) {
+                return (int) max(0, min(100, round($load[0] * 100)));
+            }
             return 0;
         }
-        $idleA  = $a['idle'] + $a['iowait'];
-        $idleB  = $b['idle'] + $b['iowait'];
-        $nonA   = $a['user'] + $a['nice'] + $a['system'] + $a['irq'] + $a['softirq'] + $a['steal'];
-        $nonB   = $b['user'] + $b['nice'] + $b['system'] + $b['irq'] + $b['softirq'] + $b['steal'];
-        $totalA = $idleA + $nonA;
-        $totalB = $idleB + $nonB;
-        $totald = $totalB - $totalA;
-        if ($totald <= 0) {
-            return 0;
+
+        $now = microtime(true);
+        $prev = Cache::get('server_stats_cpu_last_sample');
+        $cachedUsage = Cache::get('server_stats_cpu_usage_cached');
+
+        if (is_array($prev) && isset($prev['stat'], $prev['time'])) {
+            $elapsed = $now - (float) $prev['time'];
+
+            // If sampled very recently (< 0.8s), return the cached percentage to prevent division by near-zero delta
+            if ($elapsed < 0.8 && $cachedUsage !== null) {
+                return (int) $cachedUsage;
+            }
+
+            $pStat = $prev['stat'];
+            $idlePrev = $pStat['idle'] + $pStat['iowait'];
+            $idleCurr = $curr['idle'] + $curr['iowait'];
+
+            $nonPrev = $pStat['user'] + $pStat['nice'] + $pStat['system'] + $pStat['irq'] + $pStat['softirq'] + $pStat['steal'];
+            $nonCurr = $curr['user'] + $curr['nice'] + $curr['system'] + $curr['irq'] + $curr['softirq'] + $curr['steal'];
+
+            $totalPrev = $idlePrev + $nonPrev;
+            $totalCurr = $idleCurr + $nonCurr;
+
+            $totalDelta = $totalCurr - $totalPrev;
+            $idleDelta = $idleCurr - $idlePrev;
+
+            if ($totalDelta > 0) {
+                $usage = (1.0 - ($idleDelta / $totalDelta)) * 100.0;
+                $percent = (int) max(0, min(100, round($usage)));
+
+                // Update sample & cached usage
+                Cache::put('server_stats_cpu_last_sample', ['stat' => $curr, 'time' => $now], 120);
+                Cache::put('server_stats_cpu_usage_cached', $percent, 120);
+
+                return $percent;
+            }
         }
-        $idled = $idleB - $idleA;
-        $usage = (1 - ($idled / $totald)) * 100;
-        return (int) max(0, min(100, round($usage)));
+
+        // Cold start (no valid previous sample in cache):
+        // Take a single ultra-short sample (25ms) once to prime the cache
+        usleep(25_000);
+        $next = $this->readCpuStat();
+        if ($next) {
+            $idleA = $curr['idle'] + $curr['iowait'];
+            $idleB = $next['idle'] + $next['iowait'];
+            $nonA  = $curr['user'] + $curr['nice'] + $curr['system'] + $curr['irq'] + $curr['softirq'] + $curr['steal'];
+            $nonB  = $next['user'] + $next['nice'] + $next['system'] + $next['irq'] + $next['softirq'] + $next['steal'];
+
+            $totalA = $idleA + $nonA;
+            $totalB = $idleB + $nonB;
+            $totald = $totalB - $totalA;
+            $usage = 0;
+            if ($totald > 0) {
+                $idled = $idleB - $idleA;
+                $usage = (1.0 - ($idled / $totald)) * 100.0;
+            }
+            $percent = (int) max(0, min(100, round($usage)));
+            Cache::put('server_stats_cpu_last_sample', ['stat' => $next, 'time' => microtime(true)], 120);
+            Cache::put('server_stats_cpu_usage_cached', $percent, 120);
+            return $percent;
+        }
+
+        Cache::put('server_stats_cpu_last_sample', ['stat' => $curr, 'time' => $now], 120);
+        return (int) ($cachedUsage ?? 0);
     }
 
     /**
@@ -235,27 +289,31 @@ class ServerStatsService
 
     public function getDiskUsageStats(string $mountPoint = '/'): array
     {
-        $total = @disk_total_space($mountPoint);
-        $free  = @disk_free_space($mountPoint);
+        $cacheKey = 'server_disk_stats_' . md5($mountPoint);
 
-        if (!$total || !$free) {
-            return ['percent' => 0, 'used_gb' => 0, 'total_gb' => 0, 'free_gb' => 0];
-        }
+        return Cache::remember($cacheKey, 30, function () use ($mountPoint) {
+            $total = @disk_total_space($mountPoint);
+            $free  = @disk_free_space($mountPoint);
 
-        $used = max(0, $total - $free);
+            if (!$total || !$free) {
+                return ['percent' => 0, 'used_gb' => 0, 'total_gb' => 0, 'free_gb' => 0];
+            }
 
-        $percent = (int) max(0, min(100, round(($used / $total) * 100)));
+            $used = max(0, $total - $free);
 
-        $totalGb = round($total / 1024 / 1024 / 1024, 2);
-        $usedGb  = round($used  / 1024 / 1024 / 1024, 2);
-        $freeGb  = round($free  / 1024 / 1024 / 1024, 2);
+            $percent = (int) max(0, min(100, round(($used / $total) * 100)));
 
-        return [
-            'percent'  => $percent,
-            'used_gb'  => $usedGb,
-            'total_gb' => $totalGb,
-            'free_gb'  => $freeGb,
-        ];
+            $totalGb = round($total / 1024 / 1024 / 1024, 2);
+            $usedGb  = round($used  / 1024 / 1024 / 1024, 2);
+            $freeGb  = round($free  / 1024 / 1024 / 1024, 2);
+
+            return [
+                'percent'  => $percent,
+                'used_gb'  => $usedGb,
+                'total_gb' => $totalGb,
+                'free_gb'  => $freeGb,
+            ];
+        });
     }
 
     /**
@@ -304,76 +362,109 @@ class ServerStatsService
     }
 
     /**
-     * Detects PHP-FPM service name (depending on version) or returns null.
+     * Detects PHP-FPM service name with 24-hour cache.
      */
     private function detectPhpFpmServiceName(): ?string
     {
-        $candidates = ['php8.2-fpm'];
-        foreach ($candidates as $c) {
-            if ($this->isUnitExists($c)) {
-                return $c;
+        return Cache::remember('server_detected_unit_php_fpm', 86400, function () {
+            $candidates = ['php8.2-fpm', 'php8.3-fpm', 'php8.1-fpm', 'php-fpm'];
+            foreach ($candidates as $c) {
+                if ($this->isUnitExists($c)) {
+                    return $c;
+                }
             }
-        }
-        return null;
+            return null;
+        });
     }
 
     /**
-     * Detects MySQL/MariaDB service name.
+     * Detects MySQL/MariaDB service name with 24-hour cache.
      */
     private function detectMysqlServiceName(): ?string
     {
-        $candidates = ['mysql', 'mariadb'];
-        foreach ($candidates as $c) {
-            if ($this->isUnitExists($c)) {
-                return $c;
+        return Cache::remember('server_detected_unit_mysql', 86400, function () {
+            $candidates = ['mysql', 'mariadb'];
+            foreach ($candidates as $c) {
+                if ($this->isUnitExists($c)) {
+                    return $c;
+                }
             }
-        }
-        return 'mysql';
+            return 'mysql';
+        });
     }
 
     /**
      * Returns status for a list of systemd services.
+     * Batches all units into a single command and caches results for 15 seconds.
      */
-    private function getSystemdStatuses(array $serviceNames): array
+    public function getSystemdStatuses(array $serviceNames): array
     {
-        $out = [];
-        foreach ($serviceNames as $key => $unit) {
-            $state = 'unknown';
+        $cacheKey = 'server_systemd_statuses_' . md5(json_encode($serviceNames));
+
+        return Cache::remember($cacheKey, 15, function () use ($serviceNames) {
+            $out = [];
+            if (empty($serviceNames)) {
+                return $out;
+            }
+
+            // Batch all service units in a single systemctl command
+            $units = array_values($serviceNames);
+            $escapedUnits = array_map('escapeshellarg', $units);
+
             try {
-                $res = Process::run('systemctl is-active ' . escapeshellarg($unit));
-                if ($res->successful()) {
-                    $state = trim($res->output());
-                } else {
-                    $state = trim($res->output() ?: $res->errorOutput()) ?: 'unknown';
+                $cmd = 'systemctl is-active ' . implode(' ', $escapedUnits);
+                $res = Process::run($cmd);
+                $lines = explode("\n", trim($res->output() ?: ''));
+
+                $i = 0;
+                foreach ($serviceNames as $key => $unit) {
+                    $state = isset($lines[$i]) && trim($lines[$i]) !== '' ? trim($lines[$i]) : 'unknown';
+                    $out[$key] = [
+                        'unit'  => $unit,
+                        'state' => $state,
+                    ];
+                    $i++;
                 }
             } catch (\Throwable $e) {
-                $state = 'unknown';
+                foreach ($serviceNames as $key => $unit) {
+                    $out[$key] = [
+                        'unit'  => $unit,
+                        'state' => 'unknown',
+                    ];
+                }
             }
-            $out[$key] = [
-                'unit'  => $unit,
-                'state' => $state,
-            ];
-        }
-        return $out;
+
+            return $out;
+        });
     }
 
     /**
      * Logs metrics to cache for trend charts.
-     * Stores at most the 100 latest entries.
+     * Rate-limited to record at most once every 30 seconds.
      */
     private function logMetrics(array $values): void
     {
+        $lastLogged = (int) Cache::get('server_metrics_last_logged_at', 0);
+        $now = Carbon::now()->timestamp;
+
+        // Rate limit: record at most once every 30 seconds
+        if (($now - $lastLogged) < 30 && Cache::has('server_metrics')) {
+            return;
+        }
+
+        Cache::put('server_metrics_last_logged_at', $now, now()->addHours(2));
+
         $metrics = Cache::get('server_metrics', []);
         $metrics[] = [
-            'timestamp' => Carbon::now()->timestamp,
+            'timestamp' => $now,
             'cpu'       => $values['cpu'],
             'mem'       => $values['mem'],
             'disk'      => $values['disk'],
         ];
-        if (count($metrics) > 100) {
-            $metrics = array_slice($metrics, -100);
+        if (count($metrics) > 60) {
+            $metrics = array_slice($metrics, -60);
         }
-        Cache::put('server_metrics', $metrics, now()->addHours(1));
+        Cache::put('server_metrics', $metrics, now()->addHours(2));
     }
 
     /**
@@ -447,119 +538,167 @@ class ServerStatsService
     }
 
     /**
-     * Returns top N processes sorted by CPU usage.
+     * Returns top N processes sorted by CPU usage with 15s cache.
      */
     public function getTopProcesses(int $limit = 5): array
     {
-        $out = [];
-        try {
-            $cmd = 'ps -eo pid,user,%cpu,%mem,command --sort=-%cpu | head -n ' . (int) ($limit + 1);
-            $result = Process::run($cmd);
-            if ($result->successful()) {
-                $lines = array_filter(explode("\n", trim($result->output())));
-                // remove header
-                array_shift($lines);
-                foreach ($lines as $line) {
-                    $parts = preg_split('/\s+/', trim($line), 5);
-                    if (count($parts) < 5) {
-                        continue;
+        return Cache::remember('server_top_processes_' . $limit, 15, function () use ($limit) {
+            $out = [];
+            try {
+                $cmd = 'ps -eo pid,user,%cpu,%mem,command --sort=-%cpu | head -n ' . (int) ($limit + 1);
+                $result = Process::run($cmd);
+                if ($result->successful()) {
+                    $lines = array_filter(explode("\n", trim($result->output())));
+                    // remove header
+                    array_shift($lines);
+                    foreach ($lines as $line) {
+                        $parts = preg_split('/\s+/', trim($line), 5);
+                        if (count($parts) < 5) {
+                            continue;
+                        }
+                        [$pid, $user, $cpuUsage, $memUsage, $command] = $parts;
+                        $out[] = [
+                            'pid'     => (int) $pid,
+                            'user'    => $user,
+                            'cpu'     => (float) $cpuUsage,
+                            'mem'     => (float) $memUsage,
+                            'command' => mb_strimwidth($command, 0, 50, '…'),
+                        ];
                     }
-                    [$pid, $user, $cpuUsage, $memUsage, $command] = $parts;
-                    $out[] = [
-                        'pid'     => (int) $pid,
-                        'user'    => $user,
-                        'cpu'     => (float) $cpuUsage,
-                        'mem'     => (float) $memUsage,
-                        'command' => mb_strimwidth($command, 0, 50, '…'),
-                    ];
                 }
+            } catch (\Throwable $e) {
+                // ignore
             }
-        } catch (\Throwable $e) {
-            // ignore
-        }
-        return $out;
+            return $out;
+        });
     }
 
     /**
-     * Retrieves queue and failed job counts from database.
+     * Retrieves queue and failed job counts from database with 15s cache.
      */
     public function getQueueStats(): array
     {
-        $pending = 0;
-        $failed  = 0;
-        try {
-            if (DB::getSchemaBuilder()->hasTable('jobs')) {
-                $pending = DB::table('jobs')->count();
+        return Cache::remember('server_queue_stats', 15, function () {
+            $pending = 0;
+            $failed  = 0;
+            try {
+                if (DB::getSchemaBuilder()->hasTable('jobs')) {
+                    $pending = DB::table('jobs')->count();
+                }
+                if (DB::getSchemaBuilder()->hasTable('failed_jobs')) {
+                    $failed = DB::table('failed_jobs')->count();
+                }
+            } catch (\Throwable $e) {
+                // ignore errors
             }
-            if (DB::getSchemaBuilder()->hasTable('failed_jobs')) {
-                $failed = DB::table('failed_jobs')->count();
-            }
-        } catch (\Throwable $e) {
-            // ignore errors
-        }
-        return ['pending' => $pending, 'failed' => $failed];
+            return ['pending' => $pending, 'failed' => $failed];
+        });
     }
 
     /**
-     * Returns the last reboot time by parsing the output of who -b.
+     * Returns the last reboot time without executing external commands when possible.
      */
-    private function getLastReboot(): string
+    public function getLastReboot(): string
     {
-        try {
-            $result = Process::run('who -b');
-            if ($result->successful()) {
-                // sample output: " system boot  2023-09-28 12:45"
-                $parts = preg_split('/\s+/', trim($result->output()));
-                $date = implode(' ', array_slice($parts, -2));
-                return $date;
+        return Cache::remember('server_last_reboot', 86400, function () {
+            $uptimeSeconds = $this->getUptimeSeconds();
+            if ($uptimeSeconds > 0) {
+                return date('Y-m-d H:i', time() - $uptimeSeconds);
             }
-        } catch (\Throwable $e) {
-            // ignore
-        }
-        return 'Unknown';
+            try {
+                $result = Process::run('who -b');
+                if ($result->successful()) {
+                    $parts = preg_split('/\s+/', trim($result->output()));
+                    return implode(' ', array_slice($parts, -2));
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
+            return 'Unknown';
+        });
     }
 
     /**
      * Retrieves a limited number of SSH login attempts.
+     * Uses O(1) tail-seeking and 60s cache instead of full-file grep.
      */
     public function getLoginHistory(int $limit = 5): array
     {
-        $history = [];
-        $paths = ['/var/log/auth.log', '/var/log/secure'];
-        $logFile = null;
-        foreach ($paths as $p) {
-            if (is_readable($p)) {
-                $logFile = $p;
-                break;
+        return Cache::remember('server_login_history_' . $limit, 60, function () use ($limit) {
+            $paths = ['/var/log/auth.log', '/var/log/secure'];
+            $logFile = null;
+            foreach ($paths as $p) {
+                if (@is_readable($p)) {
+                    $logFile = $p;
+                    break;
+                }
             }
-        }
-        if (!$logFile) {
-            return [];
-        }
-        try {
-            $cmd = 'grep -E "sshd\[" ' . escapeshellarg($logFile) . ' | tail -n ' . (int) ($limit * 10);
-            $result = Process::run($cmd);
-            if ($result->successful()) {
-                $lines = array_reverse(array_filter(explode("\n", trim($result->output()))));
-                foreach ($lines as $line) {
-                    // typical line: "Jan  6 10:15:23 server sshd[12345]: Accepted password for user from 1.2.3.4 port 22"
-                    if (preg_match('/^(\w+\s+\d+\s+\d+:\d+:\d+)\s+[^\s]+\s+sshd\[[^\]]+\]:\s+(Accepted|Failed)\s+(?:publickey|password)\s+for\s+(\w+)\s+from\s+([\d\.]+).*/i', $line, $m)) {
-                        $history[] = [
-                            'timestamp' => $m[1] ?? '',
-                            'result'    => strtolower($m[2] ?? ''), // accepted/failed
-                            'user'      => $m[3] ?? '',
-                            'ip'        => $m[4] ?? '',
-                        ];
-                    }
+            if (!$logFile) {
+                return [];
+            }
+
+            // Efficiently read only the tail of the log file without scanning the full file
+            $lines = $this->readTailLines($logFile, 150);
+            if (empty($lines)) {
+                return [];
+            }
+
+            $history = [];
+            foreach (array_reverse($lines) as $line) {
+                if (str_contains($line, 'sshd[') && preg_match('/^(\w+\s+\d+\s+\d+:\d+:\d+)\s+[^\s]+\s+sshd\[[^\]]+\]:\s+(Accepted|Failed)\s+(?:publickey|password)\s+for\s+(\w+)\s+from\s+([\d\.]+).*/i', $line, $m)) {
+                    $history[] = [
+                        'timestamp' => $m[1] ?? '',
+                        'result'    => strtolower($m[2] ?? ''),
+                        'user'      => $m[3] ?? '',
+                        'ip'        => $m[4] ?? '',
+                    ];
                     if (count($history) >= $limit) {
                         break;
                     }
                 }
             }
-        } catch (\Throwable $e) {
-            // ignore
+
+            return $history;
+        });
+    }
+
+    /**
+     * Efficiently reads the last N lines from a file using fseek (O(1) memory and disk I/O).
+     */
+    private function readTailLines(string $filePath, int $maxLines = 150, int $chunkSize = 65536): array
+    {
+        $fp = @fopen($filePath, 'rb');
+        if (!$fp) {
+            try {
+                $res = Process::run('tail -n ' . (int) $maxLines . ' ' . escapeshellarg($filePath));
+                if ($res->successful()) {
+                    return array_filter(explode("\n", trim($res->output())));
+                }
+            } catch (\Throwable $e) {}
+            return [];
         }
-        return $history;
+
+        $size = @filesize($filePath) ?: 0;
+        if ($size <= 0) {
+            fclose($fp);
+            return [];
+        }
+
+        $offset = max(0, $size - $chunkSize);
+        fseek($fp, $offset);
+        $data = fread($fp, $chunkSize);
+        fclose($fp);
+
+        if ($data === false || $data === '') {
+            return [];
+        }
+
+        $lines = explode("\n", $data);
+        if ($offset > 0 && count($lines) > 0) {
+            array_shift($lines); // remove partial first line
+        }
+
+        return array_slice(array_filter($lines), -$maxLines);
     }
 
     /**

@@ -63,49 +63,94 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const setText = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val !== undefined && val !== null) {
+            el.innerText = val;
+        }
+    };
+
+    const setWidth = (id, percent) => {
+        const el = document.getElementById(id);
+        if (el && percent !== undefined && percent !== null) {
+            el.style.width = percent + '%';
+        }
+    };
+
     const updateStats = async () => {
+        const response = await window.axios.get(updateUrl);
+        const data = response.data;
+
+        // Update stat cards
+        setText('cpu_usage_value', data.cpu_usage);
+        setText('memory_usage_value', data.memory_usage);
+        setText('disk_usage_value', data.disk_usage);
+        setText('uptime_value', data.uptime);
+        setText('uptime_summary', data.uptime);
+
+        // Update progress bars
+        setWidth('cpu_usage_bar', data.cpu_usage);
+        setWidth('memory_usage_bar', data.memory_usage);
+        setWidth('disk_usage_bar', data.disk_usage);
+
+        // Update detailed usage text
+        setText('memory_used_gb', data.memory_used_gb ?? 0);
+        setText('memory_total_gb', data.memory_total_gb ?? 0);
+        setText('disk_used_gb', data.disk_used_gb ?? 0);
+        setText('disk_total_gb', data.disk_total_gb ?? 0);
+
+        // Update resource chart
+        if (data.metrics_history && resourceChart) {
+            const m = data.metrics_history;
+            resourceChart.data.labels = m.map(d => new Date(d.timestamp * 1000).toLocaleTimeString());
+            resourceChart.data.datasets[0].data = m.map(d => d.cpu);
+            resourceChart.data.datasets[1].data = m.map(d => d.mem);
+            resourceChart.data.datasets[2].data = m.map(d => d.disk);
+            resourceChart.update('none');
+        }
+    };
+
+    let pollTimeout = null;
+    let isFetching = false;
+
+    const scheduleNextPoll = (delay = 5000) => {
+        if (pollTimeout) {
+            clearTimeout(pollTimeout);
+            pollTimeout = null;
+        }
+        if (!document.hidden) {
+            pollTimeout = setTimeout(runPoll, delay);
+        }
+    };
+
+    const runPoll = async () => {
+        if (isFetching || document.hidden) {
+            return;
+        }
+        isFetching = true;
         try {
-            const response = await window.axios.get(updateUrl);
-            const data = response.data;
-
-            // Update stat cards
-            document.getElementById('cpu_usage_value').innerText = data.cpu_usage;
-            document.getElementById('memory_usage_value').innerText = data.memory_usage;
-            document.getElementById('disk_usage_value').innerText = data.disk_usage;
-            document.getElementById('uptime_value').innerText = data.uptime;
-
-            // Update progress bars
-            document.getElementById('cpu_usage_bar').style.width = data.cpu_usage + '%';
-            document.getElementById('memory_usage_bar').style.width = data.memory_usage + '%';
-            document.getElementById('disk_usage_bar').style.width = data.disk_usage + '%';
-
-            // Update detailed usage text
-            const memory_used_gb = document.getElementById('memory_used_gb');
-            if(memory_used_gb) memory_used_gb.innerText = data.memory_used_gb ?? 0;
-            const memory_total_gb = document.getElementById('memory_total_gb');
-            if(memory_total_gb) memory_total_gb.innerText = data.memory_total_gb ?? 0;
-            const disk_used_gb = document.getElementById('disk_used_gb');
-            if(disk_used_gb) disk_used_gb.innerText = data.disk_used_gb ?? 0;
-            const disk_total_gb = document.getElementById('disk_total_gb');
-            if(disk_total_gb) disk_total_gb.innerText = data.disk_total_gb ?? 0;
-
-
-            // Update resource chart
-            if (data.metrics_history) {
-                const m = data.metrics_history;
-                resourceChart.data.labels = m.map(d => new Date(d.timestamp * 1000).toLocaleTimeString());
-                resourceChart.data.datasets[0].data = m.map(d => d.cpu);
-                resourceChart.data.datasets[1].data = m.map(d => d.mem);
-                resourceChart.data.datasets[2].data = m.map(d => d.disk);
-                resourceChart.update('none');
-            }
+            await updateStats();
+            scheduleNextPoll(5000);
         } catch (error) {
             console.error('Failed to update stats:', error);
+            // On error back off to 15s to reduce server strain
+            scheduleNextPoll(15000);
+        } finally {
+            isFetching = false;
         }
     };
 
     if (updateUrl) {
-        updateStats();
-        setInterval(updateStats, 5000);
+        runPoll();
+
+        // Pause polling when tab is hidden, resume immediately when tab is active
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                runPoll();
+            } else if (pollTimeout) {
+                clearTimeout(pollTimeout);
+                pollTimeout = null;
+            }
+        });
     }
 });
