@@ -81,6 +81,7 @@ Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {
     Route::post('/backup-tasks/{service}/db-now', [BackupTaskController::class, 'backupDatabaseNow'])->name('backup_tasks.db_now');
     Route::post('/backup-tasks/{service}/files-now', [BackupTaskController::class, 'backupFilesNow'])->name('backup_tasks.files_now');
     Route::get('/backup-tasks/{service}/download/{filename}', [BackupTaskController::class, 'downloadBackup'])->name('backup_tasks.download');
+    Route::post('/backup-tasks/send-test-report', [BackupTaskController::class, 'sendTestReport'])->name('backup_tasks.send_test_report');
 });
 
 Route::middleware(['auth', TwoFactorMiddleware::class])->group(function () {

@@ -13,6 +13,10 @@ return new class extends Migration
     {
         // This migration makes the 'name' column nullable to prevent errors
         // if the column hasn't been dropped yet.
+        if (!Schema::hasTable('backup_tasks')) {
+            return;
+        }
+
         if (Schema::hasColumn('backup_tasks', 'name')) {
             Schema::table('backup_tasks', function (Blueprint $table) {
                 $table->string('name')->nullable()->change();

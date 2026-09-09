@@ -68,6 +68,18 @@ class SyncBackupCronJobs extends Command
             }
         }
 
+        // 3. Daily Backup Report Cron (runs daily at 08:00 AM)
+        $reportCronName = 'backup-daily-report';
+        $reportCommand = "php " . base_path('artisan') . " backup:send-daily-report";
+        $existingReportJob = $cronService->findJobByName($reportCronName);
+        if ($existingReportJob) {
+            $cronService->update($existingReportJob['id'], $reportCronName, '0 8 * * *', $reportCommand, null, true);
+        } else {
+            $cronService->create($reportCronName, '0 8 * * *', $reportCommand, null, true);
+        }
+        $this->line("  [+] Daily Backup Report Cron synced (0 8 * * *)");
+        $updatedCount++;
+
         $this->info("Synchronization finished. {$updatedCount} cron jobs configured to use sequential queue.");
         return 0;
     }

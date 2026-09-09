@@ -14,14 +14,16 @@ return new class extends Migration
         } catch (\Throwable $e) {}
 
         // 2. Add main vardicrm service if not exists
-        if (!Service::where('domain', 'vardicrm.ir')->exists() && !Service::where('name', 'vardicrm')->exists()) {
-            Service::create([
-                'name' => 'vardicrm',
-                'domain' => 'vardicrm.ir',
-                'type' => 'main',
-                'path' => '/var/www/server-panel',
-            ]);
-        }
+        try {
+            if (!Service::where('domain', 'vardicrm.ir')->exists() && !Service::where('name', 'vardicrm')->exists()) {
+                Service::create([
+                    'name' => 'vardicrm',
+                    'domain' => 'vardicrm.ir',
+                    'type' => 'main',
+                    'path' => '/var/www/server-panel',
+                ]);
+            }
+        } catch (\Throwable $e) {}
     }
 
     public function down(): void

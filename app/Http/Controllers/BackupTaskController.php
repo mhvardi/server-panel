@@ -234,6 +234,22 @@ class BackupTaskController extends Controller
         ]);
     }
 
+    public function sendTestReport(Request $request)
+    {
+        try {
+            $exitCode = Artisan::call('backup:send-daily-report');
+            $output = Artisan::output();
+
+            if ($exitCode === 0) {
+                return back()->with('success', 'ایمیل تست گزارش روزانه پشتیبان‌گیری ارسال شد: ' . trim($output));
+            } else {
+                return back()->with('error', 'خطا در ارسال ایمیل گزارش: ' . trim($output));
+            }
+        } catch (\Exception $e) {
+            return back()->with('error', 'خطا در فراخوانی ارسال گزارش: ' . $e->getMessage());
+        }
+    }
+
     private function createDbBackup(string $dbName, string $destPath): void
     {
         $isMock = env('BACKUP_MOCK_ENABLED', false);
@@ -776,6 +792,16 @@ class BackupTaskController extends Controller
             $legacyJob = $this->cron->findJobByName($legacyName);
             if ($legacyJob) {
                 $this->cron->delete($legacyJob['id']);
+            }
+
+            // 3. Daily Backup Report Cron (runs daily at 08:00 AM)
+            $reportCronName = 'backup-daily-report';
+            $reportCommand = "php " . base_path('artisan') . " backup:send-daily-report";
+            $existingReportJob = $this->cron->findJobByName($reportCronName);
+            if ($existingReportJob) {
+                $this->cron->update($existingReportJob['id'], $reportCronName, '0 8 * * *', $reportCommand, null, true);
+            } else {
+                $this->cron->create($reportCronName, '0 8 * * *', $reportCommand, null, true);
             }
         } catch (\Exception $e) {
             Log::warning("Could not update cron jobs for service {$service->id}: " . $e->getMessage());

@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (!Schema::hasTable('backup_tasks')) {
+            return;
+        }
+
         Schema::table('backup_tasks', function (Blueprint $table) {
             // Check if columns don't exist before adding/dropping
             if (!Schema::hasColumn('backup_tasks', 'service_id')) {

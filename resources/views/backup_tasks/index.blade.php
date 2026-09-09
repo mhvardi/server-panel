@@ -61,7 +61,16 @@
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">سیستم پشتیبان‌گیری هوشمند با تفکیک پایگاه‌داده و سورس پروژه و پردازش امن در صف ترتیبی</p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+            <!-- Test Daily Email Button -->
+            <form method="POST" action="{{ route('backup_tasks.send_test_report') }}">
+                @csrf
+                <button type="submit" class="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/60 font-bold text-xs rounded-2xl border border-blue-200/80 dark:border-blue-800/60 shadow-sm transition" title="ارسال تستی ایمیل گزارش وضعیت روزانه به ایمیل ادمین">
+                    <span>📧</span>
+                    <span>تست ارسال ایمیل گزارش روزانه</span>
+                </button>
+            </form>
+
             <button type="button" @click="testGlobal()" :disabled="testingGlobal" class="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 dark:hover:bg-purple-900/60 font-bold text-xs rounded-2xl border border-purple-200/80 dark:border-purple-800/60 shadow-sm transition">
                 <span x-show="testingGlobal" class="animate-spin inline-block w-3.5 h-3.5 border-2 border-purple-600 border-t-transparent rounded-full"></span>
                 <span x-show="!testingGlobal">🧪</span>
