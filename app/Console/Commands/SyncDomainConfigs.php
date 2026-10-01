@@ -135,6 +135,7 @@ class SyncDomainConfigs extends Command
                    . "        include snippets/fastcgi-php.conf;\n"
                    . "        fastcgi_pass unix:{$phpSock};\n"
                    . "    }\n"
+                   . "    include snippets/reverb.conf;\n"
                    . "    location ~ /\\. {\n"
                    . "        deny all;\n"
                    . "    }\n"

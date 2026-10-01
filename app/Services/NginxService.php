@@ -79,6 +79,7 @@ server {
         fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
     }
 
+    include snippets/reverb.conf;
     location ~ /\.ht {
         deny all;
     }
