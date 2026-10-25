@@ -98,4 +98,23 @@ class LoginAndDashboardTest extends TestCase
         $response->assertRedirect('/login');
         $response->assertSessionHasErrors('email');
     }
+
+    public function test_iran_ip_user_is_never_blocked_even_when_iran_ip_restriction_is_enabled(): void
+    {
+        \App\Models\SecuritySetting::set('iran_ip_restriction', 'true');
+
+        $user = User::factory()->create([
+            'email' => 'admin@test.com',
+            'password' => bcrypt('correctpassword'),
+        ]);
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '89.40.242.238'])->get('/login');
+        $response->assertStatus(200);
+
+        $loginResponse = $this->withServerVariables(['REMOTE_ADDR' => '89.40.242.238'])->post('/login', [
+            'email' => 'admin@test.com',
+            'password' => 'correctpassword',
+        ]);
+        $loginResponse->assertRedirect('/dashboard');
+    }
 }
