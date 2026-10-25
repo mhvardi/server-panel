@@ -68,7 +68,10 @@ class GeoIpService
             try {
                 $reader = new \GeoIp2\Database\Reader($dbPath);
                 $record = $reader->country($ip);
-                return $record->country->isoCode ?? 'UNKNOWN';
+                $code = $record->country->isoCode;
+                if ($code) {
+                    return substr(strtoupper($code), 0, 5);
+                }
             } catch (\Throwable $e) {
                 Log::debug("GeoIP local lookup failed for {$ip}: " . $e->getMessage());
             }
@@ -80,13 +83,16 @@ class GeoIpService
                 // Free, fast ip-api.com check with 1.5s timeout
                 $response = Http::timeout(2)->get("http://ip-api.com/json/{$ip}?fields=status,countryCode");
                 if ($response->successful() && $response->json('status') === 'success') {
-                    return $response->json('countryCode') ?? 'UNKNOWN';
+                    $code = $response->json('countryCode');
+                    if ($code) {
+                        return substr(strtoupper($code), 0, 5);
+                    }
                 }
             } catch (\Throwable $e) {
                 Log::debug("GeoIP online lookup failed for {$ip}: " . $e->getMessage());
             }
 
-            return 'UNKNOWN';
+            return 'UN';
         });
     }
 

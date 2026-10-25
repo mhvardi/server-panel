@@ -19,4 +19,12 @@ class LoginAttempt extends Model
     protected $casts = [
         'success' => 'boolean',
     ];
+
+    /**
+     * Ensure country never exceeds database column limits (VARCHAR(5))
+     */
+    public function setCountryAttribute($value): void
+    {
+        $this->attributes['country'] = $value ? substr(strtoupper(trim((string) $value)), 0, 5) : null;
+    }
 }

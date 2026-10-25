@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let pollTimeout = null;
     let isFetching = false;
 
-    const scheduleNextPoll = (delay = 5000) => {
+    const scheduleNextPoll = (delay = 30000) => {
         if (pollTimeout) {
             clearTimeout(pollTimeout);
             pollTimeout = null;
@@ -146,10 +146,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await updateStats();
-            scheduleNextPoll(5000);
+            scheduleNextPoll(30000);
         } catch (error) {
             console.error('Failed to update stats:', error);
-            scheduleNextPoll(15000);
+            scheduleNextPoll(30000);
         } finally {
             isFetching = false;
             if (refreshBtn) {

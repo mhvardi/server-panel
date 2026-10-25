@@ -8,6 +8,7 @@ use App\Models\SecuritySetting;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class LoginRateLimiter
@@ -31,23 +32,27 @@ class LoginRateLimiter
             $seconds = RateLimiter::availableIn($throttleKey);
             $hours = ceil($seconds / 3600);
 
-            // Record blocked login attempt
-            LoginAttempt::create([
-                'email' => $email,
-                'ip_address' => $ip,
-                'success' => false,
-                'user_agent' => $request->userAgent(),
-                'blocked_reason' => 'rate_limit_exceeded',
-            ]);
+            // Record blocked login attempt safely
+            try {
+                LoginAttempt::create([
+                    'email' => $email,
+                    'ip_address' => $ip,
+                    'success' => false,
+                    'user_agent' => $request->userAgent(),
+                    'blocked_reason' => 'rate_limit_exceeded',
+                ]);
 
-            SecurityEvent::log(
-                'login',
-                'critical',
-                "آی‌پی {$ip} به دلیل بیش از حد بودن تلاش‌های ناموفق به مدت {$hours} ساعت مسدود شد.",
-                "ایمیل هدف: {$email}",
-                ['ip' => $ip, 'available_in_seconds' => $seconds],
-                $ip
-            );
+                SecurityEvent::log(
+                    'login',
+                    'critical',
+                    "آی‌پی {$ip} به دلیل بیش از حد بودن تلاش‌های ناموفق به مدت {$hours} ساعت مسدود شد.",
+                    "ایمیل هدف: {$email}",
+                    ['ip' => $ip, 'available_in_seconds' => $seconds],
+                    $ip
+                );
+            } catch (\Throwable $e) {
+                Log::warning("Failed to record rate-limit login attempt: " . $e->getMessage());
+            }
 
             return back()->withErrors([
                 'email' => "تعداد تلاش‌های ناموفق بیش از ۳ بار بوده است. به دلایل امنیتی ورود برای شما به مدت ۲۴ ساعت مسدود گردید. (زمان باقیمانده: {$hours} ساعت)",

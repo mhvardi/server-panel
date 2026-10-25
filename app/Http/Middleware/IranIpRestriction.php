@@ -8,6 +8,7 @@ use App\Models\SecuritySetting;
 use App\Services\GeoIpService;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class IranIpRestriction
@@ -30,25 +31,29 @@ class IranIpRestriction
             return $next($request);
         }
 
-        // 3. Log blocked attempt
+        // 3. Log blocked attempt safely
         $country = $this->geoIp->getCountryCode($clientIp);
-        LoginAttempt::create([
-            'email' => $request->input('email'),
-            'ip_address' => $clientIp,
-            'country' => $country,
-            'success' => false,
-            'user_agent' => $request->userAgent(),
-            'blocked_reason' => 'geo_restriction_non_iran',
-        ]);
+        try {
+            LoginAttempt::create([
+                'email' => $request->input('email'),
+                'ip_address' => $clientIp,
+                'country' => $country,
+                'success' => false,
+                'user_agent' => $request->userAgent(),
+                'blocked_reason' => 'geo_restriction_non_iran',
+            ]);
 
-        SecurityEvent::log(
-            'login',
-            'warning',
-            "مسدودسازی ورود به علت موقعیت جغرافیایی غیرمجاز ({$country})",
-            "آی‌پی: {$clientIp} | کشور: {$country} | آدرس درخواست: {$request->path()}",
-            ['ip' => $clientIp, 'country' => $country],
-            $clientIp
-        );
+            SecurityEvent::log(
+                'login',
+                'warning',
+                "مسدودسازی ورود به علت موقعیت جغرافیایی غیرمجاز ({$country})",
+                "آی‌پی: {$clientIp} | کشور: {$country} | آدرس درخواست: {$request->path()}",
+                ['ip' => $clientIp, 'country' => $country],
+                $clientIp
+            );
+        } catch (\Throwable $e) {
+            Log::warning("Failed to record geo-blocked login attempt: " . $e->getMessage());
+        }
 
         // Render clean Persian forbidden response
         return response()->view('errors.403_security', [

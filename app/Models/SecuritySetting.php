@@ -21,10 +21,14 @@ class SecuritySetting extends Model
      */
     public static function get(string $key, mixed $default = null): mixed
     {
-        return Cache::remember("security_setting_{$key}", 300, function () use ($key, $default) {
-            $setting = static::find($key);
-            return $setting ? $setting->value : $default;
-        });
+        try {
+            return Cache::remember("security_setting_{$key}", 300, function () use ($key, $default) {
+                $setting = static::find($key);
+                return $setting ? $setting->value : $default;
+            });
+        } catch (\Throwable $e) {
+            return $default;
+        }
     }
 
     /**
@@ -32,8 +36,12 @@ class SecuritySetting extends Model
      */
     public static function set(string $key, mixed $value): void
     {
-        static::updateOrCreate(['key' => $key], ['value' => (string) $value]);
-        Cache::forget("security_setting_{$key}");
+        try {
+            static::updateOrCreate(['key' => $key], ['value' => (string) $value]);
+            Cache::forget("security_setting_{$key}");
+        } catch (\Throwable $e) {
+            // ignore
+        }
     }
 
     /**

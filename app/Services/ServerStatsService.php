@@ -476,6 +476,9 @@ class ServerStatsService
         Cache::put('server_metrics_last_logged_at', $now, now()->addHours(2));
 
         $metrics = Cache::get('server_metrics', []);
+        if (!is_array($metrics)) {
+            $metrics = [];
+        }
         $metrics[] = [
             'timestamp' => $now,
             'cpu'       => $values['cpu'],
@@ -494,6 +497,9 @@ class ServerStatsService
     public function getMetricsHistory(int $limit = 30): array
     {
         $metrics = Cache::get('server_metrics', []);
+        if (!is_array($metrics)) {
+            $metrics = [];
+        }
         return array_slice($metrics, -$limit);
     }
 

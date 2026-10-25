@@ -9,6 +9,7 @@ use App\Services\GeoIpService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -40,24 +41,28 @@ class AuthController extends Controller
             // Clear rate limiting counter on success
             RateLimiter::clear($throttleKey);
 
-            // Log successful attempt
-            if (SecuritySetting::isTrue('log_login_attempts', true)) {
-                LoginAttempt::create([
-                    'email' => $email,
-                    'ip_address' => $ip,
-                    'country' => $country,
-                    'success' => true,
-                    'user_agent' => $request->userAgent(),
-                ]);
+            // Log successful attempt safely without breaking auth on DB error
+            try {
+                if (SecuritySetting::isTrue('log_login_attempts', true)) {
+                    LoginAttempt::create([
+                        'email' => $email,
+                        'ip_address' => $ip,
+                        'country' => $country,
+                        'success' => true,
+                        'user_agent' => $request->userAgent(),
+                    ]);
 
-                SecurityEvent::log(
-                    'login',
-                    'info',
-                    "ورود موفقیت‌آمیز به پنل ({$email})",
-                    "ورود از طریق آی‌پی {$ip} ({$country}) انجام شد.",
-                    ['ip' => $ip, 'country' => $country],
-                    $ip
-                );
+                    SecurityEvent::log(
+                        'login',
+                        'info',
+                        "ورود موفقیت‌آمیز به پنل ({$email})",
+                        "ورود از طریق آی‌پی {$ip} ({$country}) انجام شد.",
+                        ['ip' => $ip, 'country' => $country],
+                        $ip
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Failed to record successful login attempt: " . $e->getMessage());
             }
 
             $request->session()->regenerate();
@@ -69,25 +74,29 @@ class AuthController extends Controller
         $lockoutMinutes = (int) SecuritySetting::get('lockout_minutes', 1440);
         RateLimiter::hit($throttleKey, $lockoutMinutes * 60);
 
-        // Record failed attempt
-        if (SecuritySetting::isTrue('log_login_attempts', true)) {
-            LoginAttempt::create([
-                'email' => $email,
-                'ip_address' => $ip,
-                'country' => $country,
-                'success' => false,
-                'user_agent' => $request->userAgent(),
-                'blocked_reason' => 'invalid_credentials',
-            ]);
+        // Record failed attempt safely
+        try {
+            if (SecuritySetting::isTrue('log_login_attempts', true)) {
+                LoginAttempt::create([
+                    'email' => $email,
+                    'ip_address' => $ip,
+                    'country' => $country,
+                    'success' => false,
+                    'user_agent' => $request->userAgent(),
+                    'blocked_reason' => 'invalid_credentials',
+                ]);
 
-            SecurityEvent::log(
-                'login',
-                'warning',
-                "تلاش ناموفق برای ورود به پنل ({$email})",
-                "رمز عبور اشتباه وارد شد. آی‌پی: {$ip} ({$country})",
-                ['ip' => $ip, 'attempts' => RateLimiter::attempts($throttleKey)],
-                $ip
-            );
+                SecurityEvent::log(
+                    'login',
+                    'warning',
+                    "تلاش ناموفق برای ورود به پنل ({$email})",
+                    "رمز عبور اشتباه وارد شد. آی‌پی: {$ip} ({$country})",
+                    ['ip' => $ip, 'attempts' => RateLimiter::attempts($throttleKey)],
+                    $ip
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Failed to record failed login attempt: " . $e->getMessage());
         }
 
         $remaining = max(0, (int) SecuritySetting::get('max_login_attempts', 3) - RateLimiter::attempts($throttleKey));
